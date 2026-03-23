@@ -5,11 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.5] - 2026-03-23
+## [0.5.6] - 2026-03-23
 
 ### Added
 - Public-repo guardrails with `AGENTS.md` and a pull request template checklist.
 - Counterparty continuity coverage and source-default validation for the MCP server and SDK.
+- Public `./client` and `./types` exports so the package can be used programmatically without depending on a separate SDK package.
+- Contributing guidance and a basic usage example adapted to the current MCP package.
 
 ### Changed
 - The published MCP package is now self-contained and no longer depends on a separate SDK package at runtime.

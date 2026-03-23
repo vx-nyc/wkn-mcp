@@ -254,6 +254,40 @@ The assistant should store the preference and then recall it from VX.
 vx-mcp [mcp|install <claude|codex>|uninstall <claude|codex>]
 ```
 
+## Programmatic Usage
+
+This package also exports a lightweight client wrapper for direct VX API access.
+
+```ts
+import { VXClient } from "@vesselnyc/mcp-server/client";
+
+const client = new VXClient({
+  apiBaseUrl: "https://api.vx.dev/v1",
+  apiKey: process.env.VX_API_KEY!,
+  source: "codex",
+});
+
+const stored = await client.store({
+  content: "User prefers TypeScript over JavaScript.",
+  context: "preferences/language",
+  memoryType: "SEMANTIC",
+  importance: 0.8,
+});
+
+const query = await client.query({
+  query: "What language does the user prefer?",
+  context: "preferences/language",
+  limit: 3,
+});
+
+await client.delete(stored.id);
+```
+
+Available subpath exports:
+
+- `@vesselnyc/mcp-server/client`
+- `@vesselnyc/mcp-server/types`
+
 ## Development
 
 ```bash
@@ -262,6 +296,8 @@ npm test
 ```
 
 Use `VX_API_BASE_URL`, `VX_API_KEY`, or `VX_BEARER_TOKEN` when running against a real VX environment.
+
+See `CONTRIBUTING.md` for contributor workflow and public-repo safety rules.
 
 ## Manual QA
 
