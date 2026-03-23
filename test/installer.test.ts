@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildClaudeMcpConfigObject,
   buildCodexTomlBlock,
+  buildCursorDeeplink,
+  buildCursorMcpConfigObject,
   CODEX_BLOCK_START,
   getInstallEnv,
   getPackagedLauncher,
@@ -98,6 +100,35 @@ describe("installer helpers", () => {
     expect(block).toContain('VX_NAME = "VX"');
     expect(block).toContain('VX_SOURCE = "codex"');
     expect(block).not.toContain("VX_API_URL");
+  });
+
+  it("builds a Cursor deeplink with the expected packaged MCP config", () => {
+    const env = getInstallEnv("cursor", {
+      VX_API_BASE_URL: "https://api.vx.dev/v1",
+      VX_API_KEY: "test-api-key",
+      VX_NAME: "VX",
+    });
+    const deeplink = buildCursorDeeplink("vx", getPackagedLauncher(), env);
+    const parsed = new URL(deeplink);
+    const encodedConfig = parsed.searchParams.get("config");
+
+    expect(parsed.protocol).toBe("cursor:");
+    expect(parsed.hostname).toBe("anysphere.cursor-deeplink");
+    expect(parsed.pathname).toBe("/mcp/install");
+    expect(parsed.searchParams.get("name")).toBe("vx");
+    expect(encodedConfig).toBeTruthy();
+
+    const config = JSON.parse(
+      Buffer.from(encodedConfig!, "base64").toString("utf8")
+    );
+
+    expect(config).toEqual(buildCursorMcpConfigObject(getPackagedLauncher(), env));
+    expect(config.env).toEqual({
+      VX_API_BASE_URL: "https://api.vx.dev/v1",
+      VX_API_KEY: "test-api-key",
+      VX_NAME: "VX",
+      VX_SOURCE: "cursor",
+    });
   });
 
   it("keeps the Codex managed block idempotent", () => {

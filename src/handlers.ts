@@ -7,6 +7,9 @@ import {
   importMemories,
   type CreateMemoryInput,
   type CreateContextInput,
+  type CounterpartyIdentity,
+  type QueryMemoriesInput,
+  type HybridQueryInput,
   type QueryResponse,
   type VxKnowledgeContext,
 } from "@vx/sdk";
@@ -26,12 +29,27 @@ export type VxClientLike = {
   createContext?(input: CreateContextInput): Promise<VxKnowledgeContext>;
   getContext?(name: string): Promise<VxKnowledgeContext>;
   listContexts?(params?: { prefix?: string; includeStats?: boolean; limit?: number; offset?: number }): Promise<{ contexts: VxKnowledgeContext[]; total: number; limit: number; offset: number }>;
-  queryMemories(input: { query: string; limit?: number; contexts?: string[]; memoryTypes?: VxMemoryType[]; minScore?: number }): Promise<QueryResponse>;
+  queryMemories(input: QueryMemoriesInput): Promise<QueryResponse>;
   listMemories?(params?: { limit?: number; offset?: number; context?: string; memoryType?: string }): Promise<{ memories: { id: string; content: string; context?: string }[]; total: number; hasMore: boolean }>;
-  queryHybrid(input: { query: string; limit?: number; contexts?: string[]; memoryTypes?: string[]; minScore?: number }): Promise<QueryResponse | { data: QueryResponse }>;
+  queryHybrid(input: HybridQueryInput): Promise<QueryResponse | { data: QueryResponse }>;
   buildContextPacket(input: { query: string; contexts?: string[]; maxTokens?: number }): Promise<{ formatted: string; memoriesUsed: number }>;
   deleteMemory(id: string): Promise<void>;
 };
+
+function getCounterparty(args: {
+  counterpartyId?: string;
+  counterpartyKind?: string;
+  counterpartyClient?: string;
+  counterpartySession?: string;
+}): CounterpartyIdentity | undefined {
+  if (!args.counterpartyId) return undefined;
+  return {
+    id: args.counterpartyId,
+    kind: args.counterpartyKind,
+    client: args.counterpartyClient,
+    session: args.counterpartySession,
+  };
+}
 
 function formatContextCount(context: VxKnowledgeContext): string | null {
   const count = context.memory_count ?? context.memoryCount;
@@ -51,14 +69,25 @@ function formatContextTimestamp(context: VxKnowledgeContext): string | null {
 
 export async function handleVxStore(
   client: VxClientLike,
-  args: { content: string; context?: string; memoryType?: string; importance?: number },
+  args: {
+    content: string;
+    context?: string;
+    memoryType?: string;
+    importance?: number;
+    counterpartyId?: string;
+    counterpartyKind?: string;
+    counterpartyClient?: string;
+    counterpartySession?: string;
+  },
   meta: { source: string; name: string; client?: string }
 ): Promise<string> {
+  const counterparty = getCounterparty(args);
   const input: CreateMemoryInput = {
     content: args.content,
     context: args.context,
     memoryType: (args.memoryType as CreateMemoryInput["memoryType"]) || "SEMANTIC",
     source: meta.source,
+    counterparty,
     metadata: {
       source: meta.source,
       vxName: meta.name,
@@ -75,14 +104,27 @@ export async function handleVxStore(
 
 export async function handleVxQuery(
   client: VxClientLike,
-  args: { query: string; limit?: number; context?: string; contexts?: string[]; memoryType?: string }
+  args: {
+    query: string;
+    limit?: number;
+    context?: string;
+    contexts?: string[];
+    memoryType?: string;
+    counterpartyId?: string;
+    counterpartyKind?: string;
+    counterpartyClient?: string;
+    counterpartySession?: string;
+  },
+  meta?: { source: string }
 ): Promise<string> {
   const memoryTypes = args.memoryType ? [args.memoryType as VxMemoryType] : undefined;
+  const counterparty = getCounterparty(args);
   const result = await client.queryMemories({
     query: args.query,
     limit: args.limit ?? 10,
     contexts: args.contexts?.length ? args.contexts : args.context ? [args.context] : undefined,
     memoryTypes,
+    ...(counterparty ? { counterparty, source: meta?.source } : {}),
   });
   if (result.memories.length === 0) return "No relevant memories found.";
   const formatted = result.memories
@@ -93,24 +135,49 @@ export async function handleVxQuery(
 
 export async function handleVxRecall(
   client: VxClientLike,
-  args: { query: string; contexts?: string[]; memoryTypes?: string[]; limit?: number; minScore?: number }
+  args: {
+    query: string;
+    contexts?: string[];
+    memoryTypes?: string[];
+    limit?: number;
+    minScore?: number;
+    counterpartyId?: string;
+    counterpartyKind?: string;
+    counterpartyClient?: string;
+    counterpartySession?: string;
+  },
+  meta?: { source: string }
 ): Promise<string> {
-  const result = await client.queryHybrid({
-    query: args.query,
-    limit: args.limit ?? 10,
-    contexts: args.contexts,
-    memoryTypes: args.memoryTypes,
-    minScore: args.minScore ?? 0,
-  });
-  const normalized: QueryResponse =
-    result && typeof result === "object" && "data" in result && result.data
-      ? result.data
-      : (result as QueryResponse);
-  if (!normalized.memories?.length) return "No relevant memories found.";
-  const formatted = normalized.memories
+  const counterparty = getCounterparty(args);
+  let normalizedRecall: QueryResponse;
+  if (counterparty) {
+    normalizedRecall = await client.queryMemories({
+      query: args.query,
+      limit: args.limit ?? 10,
+      contexts: args.contexts,
+      memoryTypes: args.memoryTypes as VxMemoryType[] | undefined,
+      minScore: args.minScore ?? 0,
+      counterparty,
+      source: meta?.source,
+    });
+  } else {
+    const hybridResult = await client.queryHybrid({
+      query: args.query,
+      limit: args.limit ?? 10,
+      contexts: args.contexts,
+      memoryTypes: args.memoryTypes,
+      minScore: args.minScore ?? 0,
+    });
+    normalizedRecall =
+      hybridResult && typeof hybridResult === "object" && "data" in hybridResult
+        ? hybridResult.data
+        : hybridResult as QueryResponse;
+  }
+  if (!normalizedRecall.memories?.length) return "No relevant memories found.";
+  const formatted = normalizedRecall.memories
     .map((m, i) => `[${i + 1}] ${m.content}${m.context ? ` (context: ${m.context})` : ""}`)
     .join("\n\n");
-  return `Found ${normalized.memories.length} relevant memories (hybrid recall):\n\n${formatted}`;
+  return `Found ${normalizedRecall.memories.length} relevant memories (${counterparty ? "counterparty recall" : "hybrid recall"}):\n\n${formatted}`;
 }
 
 export async function handleVxList(

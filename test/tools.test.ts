@@ -107,6 +107,54 @@ describe("MCP tool handlers", () => {
     expect(out).toBe("No relevant memories found.");
   });
 
+  it("vx_store forwards counterparty identity through createMemory", async () => {
+    const client = createMockClient();
+    await handleVxStore(
+      client,
+      {
+        content: "Discussed deployment strategy",
+        counterpartyId: "orbit",
+        counterpartyKind: "agent",
+        counterpartyClient: "vx-client",
+      },
+      meta
+    );
+    expect(client.createMemory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        counterparty: {
+          id: "orbit",
+          kind: "agent",
+          client: "vx-client",
+        },
+      })
+    );
+  });
+
+  it("vx_query forwards counterparty identity through queryMemories", async () => {
+    const client = createMockClient();
+    await handleVxQuery(
+      client,
+      {
+        query: "deployment strategy",
+        counterpartyId: "orbit",
+        counterpartyKind: "agent",
+      },
+      { source: "codex" }
+    );
+    expect(client.queryMemories).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: "deployment strategy",
+        source: "codex",
+        counterparty: {
+          id: "orbit",
+          kind: "agent",
+          client: undefined,
+          session: undefined,
+        },
+      })
+    );
+  });
+
   it("vx_recall calls queryHybrid and returns formatted list", async () => {
     const client = createMockClient();
     const out = await handleVxRecall(client, { query: "recall me", limit: 10 });
@@ -115,6 +163,35 @@ describe("MCP tool handlers", () => {
     );
     expect(out).toContain("relevant memories (hybrid recall)");
     expect(out).toContain("hybrid result");
+  });
+
+  it("vx_recall switches to queryMemories when counterparty identity is provided", async () => {
+    const client = createMockClient();
+    const out = await handleVxRecall(
+      client,
+      {
+        query: "what were we doing",
+        counterpartyId: "atlas",
+        counterpartyKind: "subagent",
+        limit: 5,
+      },
+      { source: "codex" }
+    );
+    expect(client.queryMemories).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: "what were we doing",
+        limit: 5,
+        source: "codex",
+        counterparty: {
+          id: "atlas",
+          kind: "subagent",
+          client: undefined,
+          session: undefined,
+        },
+      })
+    );
+    expect(client.queryHybrid).not.toHaveBeenCalled();
+    expect(out).toContain("counterparty recall");
   });
 
   it("vx_list calls queryMemories with query * and returns list", async () => {

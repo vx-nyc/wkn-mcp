@@ -28,6 +28,12 @@ export type PackagedLauncher = {
   args: string[];
 };
 
+export type CursorMcpConfig = {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+};
+
 export type InstallerDeps = {
   copyFileSync: typeof copyFileSync;
   existsSync: typeof existsSync;
@@ -90,7 +96,7 @@ export function getPackagedLauncher(): PackagedLauncher {
 }
 
 export function getInstallEnv(
-  source: "claude" | "codex",
+  source: "claude" | "codex" | "cursor",
   env: NodeJS.ProcessEnv = process.env
 ): Record<string, string> {
   const sourceTag = source === "claude" ? "claude-code" : source;
@@ -167,6 +173,30 @@ export function buildClaudeMcpConfig(
   env = getInstallEnv("claude")
 ): string {
   return JSON.stringify(buildClaudeMcpConfigObject(launcher, env));
+}
+
+export function buildCursorMcpConfigObject(
+  launcher: PackagedLauncher = getPackagedLauncher(),
+  env = getInstallEnv("cursor")
+): CursorMcpConfig {
+  return {
+    command: launcher.command,
+    args: launcher.args,
+    env,
+  };
+}
+
+export function buildCursorDeeplink(
+  name = "vx",
+  launcher: PackagedLauncher = getPackagedLauncher(),
+  env = getInstallEnv("cursor")
+): string {
+  const encodedConfig = Buffer.from(
+    JSON.stringify(buildCursorMcpConfigObject(launcher, env)),
+    "utf8"
+  ).toString("base64");
+
+  return `cursor://anysphere.cursor-deeplink/mcp/install?name=${encodeURIComponent(name)}&config=${encodeURIComponent(encodedConfig)}`;
 }
 
 function copySkill(

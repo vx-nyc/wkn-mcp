@@ -10,6 +10,48 @@ export type VxMemory = {
   score?: number;
 };
 
+export type DigitalSpaceInput = {
+  platform: string;
+  context?: string;
+  app?: string;
+  session?: string;
+};
+
+export type SpaceContextInput = {
+  physical?: {
+    lat: number;
+    lng: number;
+    altitude?: number;
+    accuracy?: number;
+    source?: "gps" | "wifi" | "ip" | "cell" | "manual" | "inferred";
+    placeName?: string;
+    placeType?: string;
+    placeId?: string;
+  };
+  digital?: DigitalSpaceInput[];
+  inferred?: boolean;
+  restricted?: boolean;
+  confidence?: number;
+};
+
+export type QuerySpaceInput = {
+  physical?: {
+    lat: number;
+    lng: number;
+  };
+  digital?: DigitalSpaceInput[];
+};
+
+export type CounterpartyIdentity = {
+  id: string;
+  kind?: string;
+  client?: string;
+  session?: string;
+};
+
+// Backward-compatible alias while clients migrate to the generalized name.
+export type AgentMemoryIdentity = CounterpartyIdentity;
+
 type VxEnvelope<T> = {
   data: T;
   meta?: Record<string, unknown>;
@@ -25,10 +67,13 @@ export type CreateMemoryInput = {
   memoryType?: 'SEMANTIC' | 'EPISODIC' | 'EMOTIONAL' | 'PROCEDURAL' | 'CONTEXTUAL';
   metadata?: Record<string, unknown>;
   emotionalValence?: number;
+  spaceContext?: SpaceContextInput;
   level?: number;
   scope?: 'private' | 'organization' | 'public';
   signals?: string[];
   source?: string;
+  counterparty?: CounterpartyIdentity;
+  agent?: AgentMemoryIdentity;
 };
 
 export type CreateMemoriesBatchResponse = {
@@ -49,6 +94,9 @@ export type QueryMemoriesInput = {
   since?: string;
   until?: string;
   source?: string;
+  space?: QuerySpaceInput;
+  counterparty?: CounterpartyIdentity;
+  agent?: AgentMemoryIdentity;
   output?: {
     mode?: 'standard' | 'concise' | 'benchmark';
     maxContentChars?: number;
@@ -189,6 +237,7 @@ export type VxClientConfig = {
   apiKey?: string;
   bearerToken?: string;
   custodianId?: string;
+  source?: string;
   requestTimeoutMs?: number;
   apiHealthRetryCount?: number;
   apiHealthRetryDelayMs?: number;
@@ -200,6 +249,119 @@ type VxHealthOptions = {
   retryDelayMs: number;
   timeoutMs: number;
 };
+
+function compactRecord<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as T;
+}
+
+function mergeDigitalSpaces(
+  primary: DigitalSpaceInput,
+  existing?: DigitalSpaceInput[],
+): DigitalSpaceInput[] {
+  const primaryKey = JSON.stringify(primary);
+  const rest = (existing || []).filter((item) => JSON.stringify(item) !== primaryKey);
+  return [primary, ...rest];
+}
+
+function getCounterpartyKind(counterparty: CounterpartyIdentity): string {
+  return counterparty.kind?.trim() || 'counterparty';
+}
+
+function getCounterpartyDigitalSpace(counterparty: CounterpartyIdentity): DigitalSpaceInput {
+  return compactRecord({
+    platform: getCounterpartyKind(counterparty),
+    context: counterparty.id,
+    app: counterparty.client,
+    session: counterparty.session,
+  });
+}
+
+function getCounterpartyMetadata(counterparty: CounterpartyIdentity): Record<string, unknown> {
+  return compactRecord({
+    counterpartyId: counterparty.id,
+    counterpartyKind: getCounterpartyKind(counterparty),
+    counterpartyClient: counterparty.client,
+    counterpartySession: counterparty.session,
+  });
+}
+
+function sanitizeContextSegment(value: string | undefined, fallback: string): string {
+  return (value || fallback)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9/_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-/]+|[-/]+$/g, "");
+}
+
+function getCounterpartyContextPath(counterparty: CounterpartyIdentity): string {
+  const kind = sanitizeContextSegment(getCounterpartyKind(counterparty), "counterparty");
+  const id = sanitizeContextSegment(counterparty.id, "unknown");
+  return `counterparty/${kind}/${id}`;
+}
+
+function normalizeCreateMemoryInput(
+  input: CreateMemoryInput,
+  defaultSource?: string,
+): Omit<CreateMemoryInput, "agent" | "counterparty"> {
+  const counterparty = input.counterparty ?? input.agent;
+  const { agent: _agent, counterparty: _counterparty, metadata, spaceContext, context, source, ...rest } = input;
+
+  if (!counterparty) {
+    return compactRecord({
+      ...rest,
+      source: source ?? defaultSource,
+      metadata,
+      spaceContext,
+      context,
+    }) as Omit<CreateMemoryInput, "agent" | "counterparty">;
+  }
+
+  const counterpartyDigital = getCounterpartyDigitalSpace(counterparty);
+  return compactRecord({
+    ...rest,
+    source: source ?? defaultSource,
+    context: context || getCounterpartyContextPath(counterparty),
+    metadata: {
+      ...(metadata || {}),
+      ...getCounterpartyMetadata(counterparty),
+    },
+    spaceContext: {
+      physical: spaceContext?.physical,
+      digital: mergeDigitalSpaces(counterpartyDigital, spaceContext?.digital),
+      inferred: spaceContext?.inferred ?? false,
+      restricted: spaceContext?.restricted ?? false,
+      confidence: spaceContext?.confidence ?? 1,
+    },
+  }) as Omit<CreateMemoryInput, "agent" | "counterparty">;
+}
+
+function normalizeQueryMemoriesInput(
+  input: QueryMemoriesInput,
+  defaultSource?: string,
+): Omit<QueryMemoriesInput, "agent" | "counterparty"> {
+  const counterparty = input.counterparty ?? input.agent;
+  const { agent: _agent, counterparty: _counterparty, space, source, ...rest } = input;
+
+  if (!counterparty) {
+    return compactRecord({
+      ...rest,
+      source,
+      space,
+    }) as Omit<QueryMemoriesInput, "agent" | "counterparty">;
+  }
+
+  return compactRecord({
+    ...rest,
+    source: source ?? defaultSource,
+    space: {
+      physical: space?.physical,
+      digital: mergeDigitalSpaces(getCounterpartyDigitalSpace(counterparty), space?.digital),
+    },
+  }) as Omit<QueryMemoriesInput, "agent" | "counterparty">;
+}
 
 function makeHeaders(config: VxClientConfig): Record<string, string> {
   const headers: Record<string, string> = {
@@ -470,14 +632,16 @@ export class VxApiClient {
   async createMemory(input: CreateMemoryInput): Promise<VxMemory> {
     return this.request<VxMemory>('/memories', {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: JSON.stringify(normalizeCreateMemoryInput(input, this.config.source)),
     });
   }
 
   async createMemoriesBatch(memories: CreateMemoryInput[]): Promise<CreateMemoriesBatchResponse> {
     return this.request<CreateMemoriesBatchResponse>('/memories/batch', {
       method: 'POST',
-      body: JSON.stringify({ memories }),
+      body: JSON.stringify({
+        memories: memories.map((memory) => normalizeCreateMemoryInput(memory, this.config.source)),
+      }),
     });
   }
 
@@ -561,14 +725,14 @@ export class VxApiClient {
   async queryMemories(input: QueryMemoriesInput): Promise<QueryResponse> {
     return this.request<QueryResponse>('/query', {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: JSON.stringify(normalizeQueryMemoriesInput(input, this.config.source)),
     });
   }
 
   async queryMemoriesWithMeta(input: QueryMemoriesInput): Promise<QueryEnvelope> {
     return this.requestEnvelope<QueryResponse>('/query', {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: JSON.stringify(normalizeQueryMemoriesInput(input, this.config.source)),
     }) as Promise<QueryEnvelope>;
   }
 
