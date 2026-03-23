@@ -1,13 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildClaudeMcpConfigObject,
+  buildClientInstallArtifact,
   buildCodexTomlBlock,
   buildCursorDeeplink,
   buildCursorMcpConfigObject,
+  buildOpenClawPluginConfigObject,
+  buildOpenCodeConfigObject,
   CODEX_BLOCK_START,
   getInstallEnv,
   getPackagedLauncher,
+  handleCli,
   installClaude,
+  installOpenClaw,
   stripCodexManagedBlock,
   upsertCodexManagedBlock,
   type InstallerDeps,
@@ -83,6 +88,19 @@ describe("installer helpers", () => {
     });
   });
 
+  it("supports additional host source tags beyond Claude, Codex, and Cursor", () => {
+    const env = getInstallEnv("windsurf", {
+      VX_API_BASE_URL: "https://api.vx.dev/v1",
+      VX_NAME: "VX",
+    });
+
+    expect(env).toEqual({
+      VX_API_BASE_URL: "https://api.vx.dev/v1",
+      VX_NAME: "VX",
+      VX_SOURCE: "windsurf",
+    });
+  });
+
   it("builds Codex TOML with packaged command and canonical env names", () => {
     const block = buildCodexTomlBlock(
       getPackagedLauncher(),
@@ -131,6 +149,50 @@ describe("installer helpers", () => {
     });
   });
 
+  it("builds an OpenCode config with a local command array", () => {
+    const config = buildOpenCodeConfigObject(
+      getInstallEnv("opencode", {
+        VX_API_BASE_URL: "https://api.vx.dev/v1",
+        VX_API_KEY: "test-api-key",
+        VX_NAME: "VX",
+      })
+    );
+
+    expect(config.$schema).toBe("https://opencode.ai/config.json");
+    expect(config.mcp.vx.command).toEqual(["npx", "-y", "@vesselnyc/mcp-server@latest", "mcp"]);
+    expect(config.mcp.vx.env.VX_SOURCE).toBe("opencode");
+  });
+
+  it("builds an OpenClaw-compatible plugin config", () => {
+    const config = buildOpenClawPluginConfigObject(
+      getInstallEnv("openclaw", {
+        VX_API_BASE_URL: "https://api.vx.dev/v1",
+        VX_BEARER_TOKEN: "vx-token",
+        VX_NAME: "VX",
+      })
+    );
+
+    expect(config.plugins.entries["vx-memory"].enabled).toBe(true);
+    expect(config.plugins.entries["vx-memory"].config).toMatchObject({
+      apiBaseUrl: "https://api.vx.dev/v1",
+      bearerToken: "vx-token",
+      source: "openclaw",
+      name: "VX",
+      maxTokens: 4000,
+    });
+  });
+
+  it("builds install artifacts for command-based clients", () => {
+    const artifact = buildClientInstallArtifact("amp", getInstallEnv("amp", {
+      VX_API_BASE_URL: "https://api.vx.dev/v1",
+      VX_API_KEY: "test-api-key",
+      VX_NAME: "VX",
+    }));
+
+    expect(artifact.kind).toBe("shell");
+    expect(artifact.content).toBe("amp mcp add vx -- npx -y @vesselnyc/mcp-server@latest mcp");
+  });
+
   it("keeps the Codex managed block idempotent", () => {
     const block = buildCodexTomlBlock();
     const once = upsertCodexManagedBlock("model = \"gpt-5\"", block);
@@ -138,6 +200,25 @@ describe("installer helpers", () => {
 
     expect((twice.match(new RegExp(CODEX_BLOCK_START, "g")) || []).length).toBe(1);
     expect(stripCodexManagedBlock(twice)).toBe('model = "gpt-5"');
+  });
+
+  it("prints a generated config snippet for config targets", async () => {
+    const deps = createDeps({
+      env: {
+        VX_API_BASE_URL: "https://api.vx.dev/v1",
+        VX_API_KEY: "test-api-key",
+        VX_NAME: "VX",
+      },
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const handled = await handleCli(["config", "windsurf"], deps);
+
+    expect(handled).toBe(true);
+    expect(logSpy).toHaveBeenCalled();
+    expect(logSpy.mock.calls.map((call) => call.join(" ")).join("\n")).toContain(
+      '"VX_SOURCE": "windsurf"'
+    );
   });
 });
 
@@ -223,5 +304,54 @@ describe("installClaude", () => {
         VX_SOURCE: "claude-code",
       },
     });
+  });
+});
+
+describe("installOpenClaw", () => {
+  it("falls back to manual install instructions when the CLI is missing", () => {
+    const deps = createDeps();
+    vi.mocked(deps.spawnSync).mockReturnValueOnce({
+      status: 1,
+      stdout: "",
+      stderr: "",
+      pid: 1,
+      output: [],
+      signal: null,
+    });
+
+    const notes = installOpenClaw(deps);
+    expect(notes.join("\n")).toContain("automatic plugin installation was skipped");
+    expect(notes.join("\n")).toContain('"source": "openclaw"');
+  });
+
+  it("runs the plugin install command when the OpenClaw CLI is available", () => {
+    const deps = createDeps();
+    vi.mocked(deps.spawnSync)
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: "/usr/local/bin/openclaw\n",
+        stderr: "",
+        pid: 1,
+        output: [],
+        signal: null,
+      })
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: "",
+        stderr: "",
+        pid: 2,
+        output: [],
+        signal: null,
+      });
+
+    const notes = installOpenClaw(deps);
+
+    expect(notes.join("\n")).toContain("Installed the VX plugin for OpenClaw");
+    expect(vi.mocked(deps.spawnSync).mock.calls[1]?.[1]).toEqual([
+      "plugins",
+      "install",
+      "@vesselnyc/mcp-server@latest",
+    ]);
+    expect(notes.join("\n")).toContain('"storeOnRequestOnly": false');
   });
 });
