@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/@vesselnyc/mcp-server.svg)](https://www.npmjs.com/package/@vesselnyc/mcp-server)
 [![npm downloads](https://img.shields.io/npm/dm/@vesselnyc/mcp-server.svg)](https://www.npmjs.com/package/@vesselnyc/mcp-server)
 
-Plugin-first VX memory for Claude, Codex, OpenClaw, and other MCP clients.
+Plugin-first VX memory for Claude, Codex, Cursor, OpenClaw, and other MCP clients.
 
 VX gives your assistant durable memory for:
 
@@ -93,6 +93,33 @@ VX_API_BASE_URL = "https://api.vx.dev/v1"
 VX_API_KEY = "your-api-key"
 VX_NAME = "VX"
 VX_SOURCE = "codex"
+```
+
+### Cursor
+
+One-click install:
+
+[![Add to Cursor](https://img.shields.io/badge/Add%20to-Cursor-111111?style=for-the-badge)](cursor://anysphere.cursor-deeplink/mcp/install?name=vx&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkB2ZXNzZWxueWMvbWNwLXNlcnZlckBsYXRlc3QiLCJtY3AiXSwiZW52Ijp7IlZYX0FQSV9CQVNFX1VSTCI6Imh0dHBzOi8vYXBpLnZ4LmRldi92MSIsIlZYX0FQSV9LRVkiOiJ5b3VyLWFwaS1rZXkiLCJWWF9OQU1FIjoiVlgiLCJWWF9TT1VSQ0UiOiJjdXJzb3IifX0%3D)
+
+After adding it, set your VX credential in Cursor before first use.
+
+Manual `.cursor/mcp.json` fallback:
+
+```json
+{
+  "mcpServers": {
+    "vx": {
+      "command": "npx",
+      "args": ["-y", "@vesselnyc/mcp-server@latest", "mcp"],
+      "env": {
+        "VX_API_BASE_URL": "https://api.vx.dev/v1",
+        "VX_API_KEY": "your-api-key",
+        "VX_NAME": "VX",
+        "VX_SOURCE": "cursor"
+      }
+    }
+  }
+}
 ```
 
 ### OpenClaw

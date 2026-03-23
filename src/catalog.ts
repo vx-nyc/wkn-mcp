@@ -169,6 +169,22 @@ export function getVxToolDefinitions(config: VxCatalogConfig): VxToolDefinition[
             maximum: 1,
             description: "0-1 importance score. Use higher values for core preferences or major decisions.",
           },
+          counterpartyId: {
+            type: "string",
+            description: "Optional identity of the person, bot, agent, or subagent this memory is associated with.",
+          },
+          counterpartyKind: {
+            type: "string",
+            description: "Optional type label for the counterparty, for example `user`, `agent`, `bot`, or `subagent`.",
+          },
+          counterpartyClient: {
+            type: "string",
+            description: "Optional client or channel label for the counterparty interaction.",
+          },
+          counterpartySession: {
+            type: "string",
+            description: "Optional session or thread identifier for the interaction.",
+          },
         },
         required: ["content"],
       },
@@ -206,6 +222,22 @@ export function getVxToolDefinitions(config: VxCatalogConfig): VxToolDefinition[
             description: "Minimum relevance score from 0 to 1 (default: 0).",
             default: 0,
           },
+          counterpartyId: {
+            type: "string",
+            description: "Optional identity to bias recall toward one person, bot, agent, or subagent.",
+          },
+          counterpartyKind: {
+            type: "string",
+            description: "Optional type label for the counterparty identity.",
+          },
+          counterpartyClient: {
+            type: "string",
+            description: "Optional client or channel label for the interaction identity.",
+          },
+          counterpartySession: {
+            type: "string",
+            description: "Optional session or thread identifier for the interaction identity.",
+          },
         },
         required: ["query"],
       },
@@ -240,6 +272,22 @@ export function getVxToolDefinitions(config: VxCatalogConfig): VxToolDefinition[
           enum: ["SEMANTIC", "EPISODIC", "PROCEDURAL"],
             description: "Optional memory type filter.",
           },
+        counterpartyId: {
+          type: "string",
+          description: "Optional identity to bias search toward one person, bot, agent, or subagent.",
+        },
+        counterpartyKind: {
+          type: "string",
+          description: "Optional type label for the counterparty identity.",
+        },
+        counterpartyClient: {
+          type: "string",
+          description: "Optional client or channel label for the interaction identity.",
+        },
+        counterpartySession: {
+          type: "string",
+          description: "Optional session or thread identifier for the interaction identity.",
+        },
         },
         required: ["query"],
       },

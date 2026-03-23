@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { buildCursorDeeplink, getInstallEnv, getPackagedLauncher } from "../src/installer.js";
 
 describe("README smoke checks", () => {
   it("documents the primary install flows and shipped assets", () => {
@@ -8,6 +9,7 @@ describe("README smoke checks", () => {
 
     expect(readme).toContain("npx @vesselnyc/mcp-server install claude");
     expect(readme).toContain("npx @vesselnyc/mcp-server install codex");
+    expect(readme).toContain("### Cursor");
     expect(readme).toContain("openclaw plugins install @vesselnyc/mcp-server");
     expect(readme).toContain("\"args\": [\"-y\", \"@vesselnyc/mcp-server@latest\", \"mcp\"]");
     expect(readme).toContain("VX_API_BASE_URL");
@@ -43,5 +45,40 @@ describe("README smoke checks", () => {
     expect(existsSync(join(process.cwd(), "skills/openclaw/vx-memory/SKILL.md"))).toBe(
       true
     );
+  });
+
+  it("includes a Cursor one-click deeplink with the expected packaged config", () => {
+    const readme = readFileSync(join(process.cwd(), "README.md"), "utf8");
+    const match = readme.match(
+      /\[!\[Add to Cursor\]\([^)]+\)\]\((cursor:\/\/anysphere\.cursor-deeplink\/mcp\/install\?name=[^)]+)\)/
+    );
+    const parsed = new URL(match?.[1] ?? "");
+    const encodedConfig = parsed.searchParams.get("config");
+
+    expect(parsed.protocol).toBe("cursor:");
+    expect(parsed.hostname).toBe("anysphere.cursor-deeplink");
+    expect(parsed.pathname).toBe("/mcp/install");
+    expect(parsed.searchParams.get("name")).toBe("vx");
+    expect(encodedConfig).toBeTruthy();
+
+    const actualConfig = JSON.parse(
+      Buffer.from(encodedConfig!, "base64").toString("utf8")
+    );
+    const expectedDeeplink = buildCursorDeeplink(
+      "vx",
+      getPackagedLauncher(),
+      getInstallEnv("cursor", {
+        VX_API_BASE_URL: "https://api.vx.dev/v1",
+        VX_API_KEY: "your-api-key",
+        VX_NAME: "VX",
+      })
+    );
+    const expectedConfig = JSON.parse(
+      Buffer.from(new URL(expectedDeeplink).searchParams.get("config")!, "base64").toString(
+        "utf8"
+      )
+    );
+
+    expect(actualConfig).toEqual(expectedConfig);
   });
 });

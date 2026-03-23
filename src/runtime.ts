@@ -136,6 +136,7 @@ export function createConfiguredVxClient(config: VxResolvedConfig): VxClientLike
     apiKey: config.apiKey,
     bearerToken: config.bearerToken,
     custodianId: config.custodianId,
+    source: config.source,
   });
 }
 
@@ -155,9 +156,9 @@ export async function executeVxOperation(
     case "vx_store":
       return handleVxStore(client, args as Parameters<typeof handleVxStore>[1], meta);
     case "vx_query":
-      return handleVxQuery(client, args as Parameters<typeof handleVxQuery>[1]);
+      return handleVxQuery(client, args as Parameters<typeof handleVxQuery>[1], meta);
     case "vx_recall":
-      return handleVxRecall(client, args as Parameters<typeof handleVxRecall>[1]);
+      return handleVxRecall(client, args as Parameters<typeof handleVxRecall>[1], meta);
     case "vx_list":
       return handleVxList(client, args as Parameters<typeof handleVxList>[1]);
     case "vx_delete":
