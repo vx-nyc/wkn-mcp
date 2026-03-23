@@ -85,6 +85,58 @@ export type CreateMemoriesBatchResponse = {
   }>;
 };
 
+export type ImportProvider = 'codex' | 'claude' | 'openclaw' | 'email' | 'text';
+
+export type CreateImportInput = {
+  provider: ImportProvider;
+  payload?: string;
+  file?: Blob | Buffer;
+  filename?: string;
+  baseContext?: string;
+  sourceLabel?: string;
+  dryRun?: boolean;
+  preserveTimestamps?: boolean;
+  maxChunkChars?: number;
+  chunkOverlapChars?: number;
+};
+
+export type CreateImportSummary = {
+  provider: ImportProvider;
+  sessions: number;
+  turns: number;
+  preparedMemories: number;
+  chunkedMemories: number;
+  skippedItems: number;
+  sourceLabel?: string;
+};
+
+export type CreateImportResponse = {
+  provider: ImportProvider;
+  baseContext?: string;
+  totalPrepared: number;
+  imported: number;
+  preview?: VxMemory[];
+  sample?: VxMemory[];
+  summary: CreateImportSummary;
+  errors?: Array<{
+    index: number;
+    error: string;
+  }>;
+};
+
+export type MemoryKeyInfo = {
+  hasKey: boolean;
+  algorithm?: string;
+  fingerprint?: string;
+  createdAt?: string;
+};
+
+export type SetMemoryPublicKeyResponse = {
+  algorithm: string;
+  fingerprint: string;
+  createdAt?: string;
+};
+
 export type QueryMemoriesInput = {
   query: string;
   contexts?: string[];
@@ -363,16 +415,38 @@ function normalizeQueryMemoriesInput(
   }) as Omit<QueryMemoriesInput, "agent" | "counterparty">;
 }
 
-function makeHeaders(config: VxClientConfig): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
+function makeAuthHeaders(config: VxClientConfig): Record<string, string> {
+  const headers: Record<string, string> = {};
   if (config.apiKey) headers['X-API-Key'] = config.apiKey;
   if (config.bearerToken) headers.Authorization = `Bearer ${config.bearerToken}`;
   if (config.custodianId) headers['X-Custodian-Id'] = config.custodianId;
 
   return headers;
+}
+
+function flattenHeaders(headers?: HeadersInit): Record<string, string> {
+  if (!headers) return {};
+  if (headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+  return { ...headers };
+}
+
+function buildRequestHeaders(
+  config: VxClientConfig,
+  initHeaders?: HeadersInit,
+  body?: BodyInit | null,
+): Record<string, string> {
+  const baseHeaders = body instanceof FormData
+    ? makeAuthHeaders(config)
+    : { 'Content-Type': 'application/json', ...makeAuthHeaders(config) };
+  return {
+    ...baseHeaders,
+    ...flattenHeaders(initHeaders),
+  };
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -501,8 +575,7 @@ export class VxApiClient {
         fetch(url, {
           ...init,
           headers: {
-            ...makeHeaders(this.config),
-            ...(init.headers || {}),
+            ...buildRequestHeaders(this.config, init.headers, init.body ?? null),
           },
         }),
         this.timeoutMs,
@@ -581,15 +654,10 @@ export class VxApiClient {
     if (options.description) form.append('description', options.description);
     if (options.metadata) form.append('metadata', JSON.stringify(options.metadata));
 
-    const headers: Record<string, string> = {};
-    if (this.config.apiKey) headers['X-API-Key'] = this.config.apiKey;
-    if (this.config.bearerToken) headers.Authorization = `Bearer ${this.config.bearerToken}`;
-    if (this.config.custodianId) headers['X-Custodian-Id'] = this.config.custodianId;
-
     const response = await withTimeout(
       fetch(url, {
         method: 'POST',
-        headers,
+        headers: makeAuthHeaders(this.config),
         body: form,
       }),
       this.timeoutMs
@@ -641,6 +709,71 @@ export class VxApiClient {
       method: 'POST',
       body: JSON.stringify({
         memories: memories.map((memory) => normalizeCreateMemoryInput(memory, this.config.source)),
+      }),
+    });
+  }
+
+  async createImport(input: CreateImportInput): Promise<CreateImportResponse> {
+    if (input.file) {
+      const form = new FormData();
+      const blob: Blob = input.file instanceof Buffer
+        ? new Blob([new Uint8Array(input.file)])
+        : (input.file as Blob);
+      form.append('file', blob, input.filename || `${input.provider}-import.jsonl`);
+      form.append('provider', input.provider);
+      if (input.baseContext) form.append('baseContext', input.baseContext);
+      if (input.sourceLabel) form.append('sourceLabel', input.sourceLabel);
+      if (typeof input.dryRun === 'boolean') form.append('dryRun', String(input.dryRun));
+      if (typeof input.preserveTimestamps === 'boolean') {
+        form.append('preserveTimestamps', String(input.preserveTimestamps));
+      }
+      if (typeof input.maxChunkChars === 'number') {
+        form.append('maxChunkChars', String(input.maxChunkChars));
+      }
+      if (typeof input.chunkOverlapChars === 'number') {
+        form.append('chunkOverlapChars', String(input.chunkOverlapChars));
+      }
+
+      return this.request<CreateImportResponse>('/imports', {
+        method: 'POST',
+        body: form,
+      });
+    }
+
+    if (!input.payload) {
+      throw new Error('createImport requires either `file` or `payload`.');
+    }
+
+    return this.request<CreateImportResponse>('/imports', {
+      method: 'POST',
+      body: JSON.stringify(compactRecord({
+        provider: input.provider,
+        payload: input.payload,
+        baseContext: input.baseContext,
+        sourceLabel: input.sourceLabel,
+        dryRun: input.dryRun,
+        preserveTimestamps: input.preserveTimestamps,
+        maxChunkChars: input.maxChunkChars,
+        chunkOverlapChars: input.chunkOverlapChars,
+      })),
+    });
+  }
+
+  async getMemoryKeyInfo(): Promise<MemoryKeyInfo> {
+    return this.request<MemoryKeyInfo>('/auth/memory-key', {
+      method: 'GET',
+    });
+  }
+
+  async setMemoryPublicKey(
+    publicKey: string,
+    algorithm = 'rsa-oaep-sha256',
+  ): Promise<SetMemoryPublicKeyResponse> {
+    return this.request<SetMemoryPublicKeyResponse>('/auth/memory-key', {
+      method: 'POST',
+      body: JSON.stringify({
+        publicKey,
+        algorithm,
       }),
     });
   }

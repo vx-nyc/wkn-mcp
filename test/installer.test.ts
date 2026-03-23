@@ -12,6 +12,7 @@ import {
   getPackagedLauncher,
   handleCli,
   installClaude,
+  installOpenClaw,
   stripCodexManagedBlock,
   upsertCodexManagedBlock,
   type InstallerDeps,
@@ -201,7 +202,7 @@ describe("installer helpers", () => {
     expect(stripCodexManagedBlock(twice)).toBe('model = "gpt-5"');
   });
 
-  it("prints a generated config snippet for config targets", () => {
+  it("prints a generated config snippet for config targets", async () => {
     const deps = createDeps({
       env: {
         VX_API_BASE_URL: "https://api.vx.dev/v1",
@@ -211,7 +212,7 @@ describe("installer helpers", () => {
     });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    const handled = handleCli(["config", "windsurf"], deps);
+    const handled = await handleCli(["config", "windsurf"], deps);
 
     expect(handled).toBe(true);
     expect(logSpy).toHaveBeenCalled();
@@ -303,5 +304,54 @@ describe("installClaude", () => {
         VX_SOURCE: "claude-code",
       },
     });
+  });
+});
+
+describe("installOpenClaw", () => {
+  it("falls back to manual install instructions when the CLI is missing", () => {
+    const deps = createDeps();
+    vi.mocked(deps.spawnSync).mockReturnValueOnce({
+      status: 1,
+      stdout: "",
+      stderr: "",
+      pid: 1,
+      output: [],
+      signal: null,
+    });
+
+    const notes = installOpenClaw(deps);
+    expect(notes.join("\n")).toContain("automatic plugin installation was skipped");
+    expect(notes.join("\n")).toContain('"source": "openclaw"');
+  });
+
+  it("runs the plugin install command when the OpenClaw CLI is available", () => {
+    const deps = createDeps();
+    vi.mocked(deps.spawnSync)
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: "/usr/local/bin/openclaw\n",
+        stderr: "",
+        pid: 1,
+        output: [],
+        signal: null,
+      })
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: "",
+        stderr: "",
+        pid: 2,
+        output: [],
+        signal: null,
+      });
+
+    const notes = installOpenClaw(deps);
+
+    expect(notes.join("\n")).toContain("Installed the VX plugin for OpenClaw");
+    expect(vi.mocked(deps.spawnSync).mock.calls[1]?.[1]).toEqual([
+      "plugins",
+      "install",
+      "@vesselnyc/mcp-server@latest",
+    ]);
+    expect(notes.join("\n")).toContain('"storeOnRequestOnly": false');
   });
 });

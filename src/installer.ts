@@ -16,6 +16,8 @@ import {
   VX_DEFAULT_NAME,
   VX_NPM_PACKAGE_SPEC,
 } from "./constants.js";
+import { handleKeysCli } from "./keys.js";
+import { handleMigrateCli } from "./migrate.js";
 import { normalizeApiBaseUrl, normalizeSourceTag } from "./runtime.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -635,26 +637,84 @@ export function uninstallCodex(deps: InstallerDeps = defaultDeps): string[] {
   return notes;
 }
 
-export function handleCli(argv: string[], deps: InstallerDeps = defaultDeps): boolean {
+export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
+  const notes: string[] = [];
+  const artifact = buildClientInstallArtifact(
+    "openclaw",
+    getInstallEnv("openclaw", deps.env)
+  );
+
+  if (!deps.env.VX_API_KEY && !deps.env.VX_BEARER_TOKEN) {
+    notes.push(
+      "No VX credential was found in the current environment. Add `VX_API_KEY` or `VX_BEARER_TOKEN` before using the OpenClaw plugin."
+    );
+  }
+
+  const openclawCli = findCli("openclaw", deps);
+  if (!openclawCli) {
+    notes.push(
+      `OpenClaw CLI (\`openclaw\`) was not found, so automatic plugin installation was skipped. Run \`openclaw plugins install ${VX_NPM_PACKAGE_SPEC}\` manually.`
+    );
+    notes.push(artifact.content);
+    return notes;
+  }
+
+  const installResult = deps.spawnSync(
+    openclawCli,
+    ["plugins", "install", VX_NPM_PACKAGE_SPEC],
+    { encoding: "utf8" }
+  );
+
+  if (installResult.status === 0) {
+    notes.push(
+      `Installed the VX plugin for OpenClaw with \`openclaw plugins install ${VX_NPM_PACKAGE_SPEC}\`.`
+    );
+  } else {
+    notes.push(
+      `OpenClaw CLI was found but plugin installation failed: ${
+        installResult.stderr.trim() || installResult.stdout.trim()
+      }`
+    );
+    notes.push(
+      `You can retry manually with: openclaw plugins install ${VX_NPM_PACKAGE_SPEC}`
+    );
+  }
+
+  notes.push(artifact.content);
+  return notes;
+}
+
+export async function handleCli(
+  argv: string[],
+  deps: InstallerDeps = defaultDeps
+): Promise<boolean> {
   const [command, target] = argv;
   if (!command) {
     return false;
   }
 
   if (
-    (command === "install" || command === "uninstall") &&
-    (target === "claude" || target === "codex")
+    ((command === "install" &&
+      (target === "claude" || target === "codex" || target === "openclaw")) ||
+      (command === "uninstall" &&
+        (target === "claude" || target === "codex")))
   ) {
     const notes =
       command === "install"
         ? target === "claude"
           ? installClaude(deps)
-          : installCodex(deps)
+          : target === "codex"
+            ? installCodex(deps)
+            : installOpenClaw(deps)
         : target === "claude"
           ? uninstallClaude(deps)
           : uninstallCodex(deps);
 
-    console.log(`${command === "install" ? "Installed" : "Uninstalled"} VX ${target} adapter.`);
+    console.log(
+      `${command === "install" ? "Completed" : "Removed"} VX ${target} ${
+        command === "install" ? "setup" : "integration"
+      }.`
+    );
     for (const note of notes) {
       console.log(`- ${note}`);
     }
@@ -665,6 +725,7 @@ export function handleCli(argv: string[], deps: InstallerDeps = defaultDeps): bo
     console.log("Managed install targets:");
     console.log("- claude");
     console.log("- codex");
+    console.log("- openclaw");
     console.log("");
     console.log("Config/recipe targets:");
     for (const item of SUPPORTED_CLIENT_TARGETS) {
@@ -684,12 +745,29 @@ export function handleCli(argv: string[], deps: InstallerDeps = defaultDeps): bo
     return true;
   }
 
+  if (command === "migrate") {
+    return handleMigrateCli(argv.slice(1), {
+      ...deps,
+    });
+  }
+
+  if (command === "keys") {
+    return handleKeysCli(argv.slice(1), {
+      env: deps.env,
+      homedir: deps.homedir,
+      existsSync: deps.existsSync,
+      mkdirSync: deps.mkdirSync,
+      readFileSync: deps.readFileSync,
+      writeFileSync: deps.writeFileSync,
+    });
+  }
+
   if (command === "mcp") {
     return false;
   }
 
   console.log(
-    "Usage: vx-mcp [mcp|clients|config <target>|install <claude|codex>|uninstall <claude|codex>]"
+    "Usage: vx-mcp [mcp|clients|config <target>|install <claude|codex|openclaw>|uninstall <claude|codex>|migrate [all|codex|claude|openclaw] [--dry-run] [--context <name>] [--path <file>] [--openclaw-path <file>]|keys generate [--out-dir <path>] [--force] [--skip-upload]]"
   );
   return true;
 }

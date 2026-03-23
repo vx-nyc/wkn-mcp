@@ -15,8 +15,13 @@ import {
 
 // Fail fast with a clear message if the MCP host launched us with Node < 18
 const cliArgs = process.argv.slice(2);
-if (handleCli(cliArgs)) {
-  process.exit(0);
+try {
+  if (await handleCli(cliArgs)) {
+    process.exit(0);
+  }
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
 }
 
 const nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);
