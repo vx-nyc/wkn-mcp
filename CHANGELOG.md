@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.4] - 2026-03-23
+## [0.5.5] - 2026-03-23
 
 ### Added
 - Public-repo guardrails with `AGENTS.md` and a pull request template checklist.
@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - The published MCP package is now self-contained and no longer depends on a separate SDK package at runtime.
 - Counterparty-aware source defaults now flow through the SDK, MCP runtime, and e2e coverage.
+- Tag-based publishing now skips the version rewrite when the tagged commit is already versioned correctly.
 
 ## [0.5.3] - 2026-03-20
 

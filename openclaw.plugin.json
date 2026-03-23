@@ -2,7 +2,7 @@
   "id": "vx-memory",
   "name": "VX Memory",
   "description": "Native VX memory plugin for OpenClaw with durable recall, context packets, and import workflows.",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "skills": [
     "skills/openclaw/vx-memory"
   ],
