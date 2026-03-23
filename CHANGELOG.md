@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.8] - 2026-03-23
+
+### Changed
+- Production rollout tag aligned to the current stable mainline release.
+- No functional delta versus the stabilized mainline code; this version exists to promote the current server-backed import, device-key, and plugin-first client support to a new production tag.
+
 ## [0.5.6] - 2026-03-23
 
 ### Added
