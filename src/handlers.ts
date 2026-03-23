@@ -12,7 +12,7 @@ import {
   type HybridQueryInput,
   type QueryResponse,
   type VxKnowledgeContext,
-} from "@vx/sdk";
+} from "./sdk/index.js";
 import { VX_MCP_SERVER_VERSION } from "./constants.js";
 
 export type VxMemoryType =

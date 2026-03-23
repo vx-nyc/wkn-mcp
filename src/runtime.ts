@@ -1,4 +1,4 @@
-import { createVxClient } from "@vx/sdk";
+import { createVxClient } from "./sdk/index.js";
 import {
   handleVxContext,
   handleVxContextsCreate,

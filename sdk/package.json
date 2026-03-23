@@ -1,6 +1,6 @@
 {
-  "name": "@vx/sdk",
-  "version": "0.1.0",
+  "name": "vx-mcp-sdk-local",
+  "version": "0.1.1",
   "description": "TypeScript / JavaScript SDK for the VX memory API.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -33,4 +33,3 @@
     "typescript": "^5.7.0"
   }
 }
-

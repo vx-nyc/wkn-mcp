@@ -12,7 +12,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { createVxClient, type CounterpartyIdentity, type QueryResponse } from "@vx/sdk";
+import { createVxClient, type CounterpartyIdentity, type QueryResponse } from "../src/sdk/index.js";
 
 type RegisteredUser = {
   apiKey: string;

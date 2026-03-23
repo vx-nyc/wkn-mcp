@@ -1,6 +1,6 @@
 {
   "name": "@vesselnyc/mcp-server",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Plugin-first VX memory for Claude, Codex, OpenClaw, and other MCP clients.",
   "main": "dist/index.js",
   "bin": {
@@ -75,8 +75,7 @@
     "sdk"
   ],
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "@vx/sdk": "^0.1.0"
+    "@modelcontextprotocol/sdk": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

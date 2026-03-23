@@ -1,5 +1,5 @@
 export const VX_MCP_SERVER_NAME = "vx-memory";
-export const VX_MCP_SERVER_VERSION = "0.5.3";
+export const VX_MCP_SERVER_VERSION = "0.5.4";
 export const VX_DEFAULT_NAME = "VX";
 export const VX_DEFAULT_API_BASE_URL = "https://api.vx.dev/v1";
 export const VX_DEFAULT_MAX_TOKENS = 4000;

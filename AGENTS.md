@@ -1,6 +1,6 @@
 # AGENTS.md - AI Agent Instructions for vx-mcp
 
-Instructions for AI agents working on `vx-mcp`, `@vx/sdk`, and related public client code.
+Instructions for AI agents working on `vx-mcp`, the local SDK workspace, and related public client code.
 
 ## Public Repo Guardrails
 

@@ -7,7 +7,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { createVxClient, importFromText } from "@vx/sdk";
+import { createVxClient, importFromText } from "../src/sdk/index.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -195,7 +195,7 @@ async function runMcpE2e(auth: AuthConfig): Promise<boolean> {
   });
 
   const client = new Client(
-    { name: "vx-mcp-e2e", version: "0.5.3" },
+    { name: "vx-mcp-e2e", version: "0.5.4" },
     { capabilities: {} }
   );
 
