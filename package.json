@@ -1,7 +1,7 @@
 {
-  "name": "vx-mcp-server",
-  "version": "0.5.8",
-  "private": true,
+  "name": "@vx-nyc/vx-mcp",
+  "version": "0.5.9",
+  "private": false,
   "description": "Plugin-first VX memory for Claude, Codex, OpenClaw, and other MCP clients.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -74,6 +74,10 @@
     "name": "One Memory Inc"
   },
   "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vx-nyc/vx-mcp.git"

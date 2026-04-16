@@ -1,4 +1,4 @@
-name: Release
+name: Publish
 
 on:
   push:
@@ -6,20 +6,26 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  publish:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          registry-url: https://npm.pkg.github.com
 
       - run: npm ci
       - run: npm run build
+
+      - name: Publish to GitHub Packages
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: softprops/action-gh-release@v1
         with:
