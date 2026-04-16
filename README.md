@@ -1,7 +1,4 @@
-# @vesselnyc/mcp-server
-
-[![npm version](https://img.shields.io/npm/v/@vesselnyc/mcp-server.svg)](https://www.npmjs.com/package/@vesselnyc/mcp-server)
-[![npm downloads](https://img.shields.io/npm/dm/@vesselnyc/mcp-server.svg)](https://www.npmjs.com/package/@vesselnyc/mcp-server)
+# vx-mcp-server
 
 Plugin-first VX memory for Claude, Codex, Cursor, OpenClaw, and other MCP clients.
 
@@ -28,7 +25,7 @@ Users get more continuity across sessions and spend less time repeating themselv
 Default path:
 
 ```bash
-npx @vesselnyc/mcp-server install claude
+npx vx-mcp-server install claude
 ```
 
 This installs:
@@ -50,7 +47,7 @@ Fallback: Claude Desktop MCP config
   "mcpServers": {
     "vx": {
       "command": "npx",
-      "args": ["-y", "@vesselnyc/mcp-server@latest", "mcp"],
+      "args": ["-y", "vx-mcp-server@latest", "mcp"],
       "env": {
         "VX_API_BASE_URL": "https://api.vx.dev/v1",
         "VX_API_KEY": "your-api-key",
@@ -67,7 +64,7 @@ Fallback: Claude Desktop MCP config
 Default path:
 
 ```bash
-npx @vesselnyc/mcp-server install codex
+npx vx-mcp-server install codex
 ```
 
 This installs:
@@ -78,7 +75,7 @@ This installs:
 Direct CLI fallback:
 
 ```bash
-codex mcp add vx -- npx -y @vesselnyc/mcp-server@latest mcp
+codex mcp add vx -- npx -y vx-mcp-server@latest mcp
 ```
 
 Manual `~/.codex/config.toml` fallback:
@@ -86,7 +83,7 @@ Manual `~/.codex/config.toml` fallback:
 ```toml
 [mcp_servers.vx]
 command = "npx"
-args = ["-y", "@vesselnyc/mcp-server@latest", "mcp"]
+args = ["-y", "vx-mcp-server@latest", "mcp"]
 
 [mcp_servers.vx.env]
 VX_API_BASE_URL = "https://api.vx.dev/v1"
@@ -99,7 +96,7 @@ VX_SOURCE = "codex"
 
 One-click install:
 
-[![Add to Cursor](https://img.shields.io/badge/Add%20to-Cursor-111111?style=for-the-badge)](cursor://anysphere.cursor-deeplink/mcp/install?name=vx&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkB2ZXNzZWxueWMvbWNwLXNlcnZlckBsYXRlc3QiLCJtY3AiXSwiZW52Ijp7IlZYX0FQSV9CQVNFX1VSTCI6Imh0dHBzOi8vYXBpLnZ4LmRldi92MSIsIlZYX0FQSV9LRVkiOiJ5b3VyLWFwaS1rZXkiLCJWWF9OQU1FIjoiVlgiLCJWWF9TT1VSQ0UiOiJjdXJzb3IifX0%3D)
+[![Add to Cursor](https://img.shields.io/badge/Add%20to-Cursor-111111?style=for-the-badge)](cursor://anysphere.cursor-deeplink/mcp/install?name=vx&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsInZ4LW1jcC1zZXJ2ZXJAbGF0ZXN0IiwibWNwIl0sImVudiI6eyJWWF9BUElfQkFTRV9VUkwiOiJodHRwczovL2FwaS52eC5kZXYvdjEiLCJWWF9BUElfS0VZIjoieW91ci1hcGkta2V5IiwiVlhfTkFNRSI6IlZYIiwiVlhfU09VUkNFIjoiY3Vyc29yIn19)
 
 After adding it, set your VX credential in Cursor before first use.
 
@@ -110,7 +107,7 @@ Manual `.cursor/mcp.json` fallback:
   "mcpServers": {
     "vx": {
       "command": "npx",
-      "args": ["-y", "@vesselnyc/mcp-server@latest", "mcp"],
+      "args": ["-y", "vx-mcp-server@latest", "mcp"],
       "env": {
         "VX_API_BASE_URL": "https://api.vx.dev/v1",
         "VX_API_KEY": "your-api-key",
@@ -127,7 +124,7 @@ Manual `.cursor/mcp.json` fallback:
 Install the native plugin:
 
 ```bash
-openclaw plugins install @vesselnyc/mcp-server
+openclaw plugins install vx-mcp-server
 openclaw gateway restart
 ```
 
@@ -176,7 +173,7 @@ Use this in any MCP client that accepts a local command:
   "mcpServers": {
     "vx": {
       "command": "npx",
-      "args": ["-y", "@vesselnyc/mcp-server@latest", "mcp"],
+      "args": ["-y", "vx-mcp-server@latest", "mcp"],
       "env": {
         "VX_API_BASE_URL": "https://api.vx.dev/v1",
         "VX_API_KEY": "your-api-key",
@@ -259,7 +256,7 @@ vx-mcp [mcp|install <claude|codex>|uninstall <claude|codex>]
 This package also exports a lightweight client wrapper for direct VX API access.
 
 ```ts
-import { VXClient } from "@vesselnyc/mcp-server/client";
+import { VXClient } from "vx-mcp-server/client";
 
 const client = new VXClient({
   apiBaseUrl: "https://api.vx.dev/v1",
@@ -285,8 +282,8 @@ await client.delete(stored.id);
 
 Available subpath exports:
 
-- `@vesselnyc/mcp-server/client`
-- `@vesselnyc/mcp-server/types`
+- `vx-mcp-server/client`
+- `vx-mcp-server/types`
 
 ## Development
 
@@ -305,23 +302,23 @@ Use this checklist before publishing a release.
 
 ### Claude Code
 
-1. Run `npx @vesselnyc/mcp-server install claude` with `VX_API_BASE_URL` and one VX credential set.
+1. Run `npx vx-mcp-server install claude` with `VX_API_BASE_URL` and one VX credential set.
 2. Confirm Claude Code shows the `vx` MCP server and `/vx-memory` slash command.
 3. Run `/vx-memory` and verify the guidance mentions recall, context packets, knowledge contexts, atomic storage, and imports.
 4. Create a knowledge context, store one preference inside it, then recall it in a fresh chat.
-5. Run `npx @vesselnyc/mcp-server uninstall claude` and confirm the MCP server and slash command are removed.
+5. Run `npx vx-mcp-server uninstall claude` and confirm the MCP server and slash command are removed.
 
 ### Codex
 
-1. Run `npx @vesselnyc/mcp-server install codex` with `VX_API_BASE_URL` and one VX credential set.
-2. Confirm `~/.codex/config.toml` contains a single managed VX block with `npx -y @vesselnyc/mcp-server@latest mcp`.
+1. Run `npx vx-mcp-server install codex` with `VX_API_BASE_URL` and one VX credential set.
+2. Confirm `~/.codex/config.toml` contains a single managed VX block with `npx -y vx-mcp-server@latest mcp`.
 3. Confirm `~/.codex/skills/vx-memory/SKILL.md` exists and matches the shipped workflow guidance.
 4. Start Codex, verify the VX MCP server loads, create a knowledge context, store one preference inside it, then recall it in a fresh session.
-5. Run `npx @vesselnyc/mcp-server uninstall codex` and confirm the managed block and installed skill are removed cleanly.
+5. Run `npx vx-mcp-server uninstall codex` and confirm the managed block and installed skill are removed cleanly.
 
 ### OpenClaw
 
-1. Run `openclaw plugins install @vesselnyc/mcp-server` and restart the gateway.
+1. Run `openclaw plugins install vx-mcp-server` and restart the gateway.
 2. Add `plugins.entries.vx-memory.config` with `apiBaseUrl` and one VX credential.
 3. Verify `vx_status` reports the plugin as ready.
 4. Verify `vx_contexts_create` and `vx_contexts_list` work, then store memory inside that knowledge context.
@@ -332,4 +329,3 @@ Use this checklist before publishing a release.
 
 1. Run `npm run build`.
 2. Run `npm test`.
-3. Run `npm pack --dry-run` and confirm the tarball includes `dist`, `skills`, `.claude-plugin`, and `openclaw.plugin.json`.

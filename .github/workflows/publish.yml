@@ -1,4 +1,4 @@
-name: Publish to npm
+name: Release
 
 on:
   push:
@@ -6,40 +6,20 @@ on:
       - 'v*'
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
-    
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
 
       - run: npm ci
       - run: npm run build
-
-      - name: Extract version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Sync package version with tag
-        run: |
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          TARGET_VERSION="${{ steps.version.outputs.VERSION }}"
-          if [ "$CURRENT_VERSION" != "$TARGET_VERSION" ]; then
-            npm version "$TARGET_VERSION" --no-git-tag-version
-          else
-            echo "package.json already at $CURRENT_VERSION"
-          fi
-
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - uses: softprops/action-gh-release@v1
         with:
