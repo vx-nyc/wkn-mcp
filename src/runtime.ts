@@ -17,6 +17,7 @@ import {
   VX_DEFAULT_MAX_TOKENS,
   VX_DEFAULT_NAME,
 } from "./constants.js";
+import { discoverApiBaseUrl } from "./discover.js";
 import type { VxToolName } from "./catalog.js";
 
 export type VxResolvedConfig = {
@@ -89,6 +90,24 @@ export function detectSource(
 export function normalizeApiBaseUrl(rawBase?: string): string {
   const base = (rawBase || VX_DEFAULT_API_BASE_URL).replace(/\/+$/, "");
   return base.endsWith("/v1") ? base : `${base}/v1`;
+}
+
+/**
+ * Async config resolution with service discovery.
+ * Priority: explicit input > env var > discovered URL > hardcoded default.
+ */
+export async function resolveVxConfigAsync(
+  input: VxConfigInput = {},
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd()
+): Promise<VxResolvedConfig> {
+  const explicitUrl = input.apiBaseUrl || env.VX_API_BASE_URL || env.VX_API_URL;
+  const discoveredUrl = explicitUrl ? null : await discoverApiBaseUrl();
+  return resolveVxConfig(
+    { ...input, apiBaseUrl: explicitUrl || discoveredUrl || undefined },
+    env,
+    cwd
+  );
 }
 
 export function resolveVxConfig(
