@@ -76,11 +76,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vx-nyc/client.git"
+    "url": "git+https://github.com/vx-nyc/vx-mcp.git"
   },
-  "homepage": "https://github.com/vx-nyc/client",
+  "homepage": "https://github.com/vx-nyc/vx-mcp",
   "bugs": {
-    "url": "https://github.com/vx-nyc/client/issues"
+    "url": "https://github.com/vx-nyc/vx-mcp/issues"
   },
   "funding": {
     "type": "github",
