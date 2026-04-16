@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "description": "Claude Code plugins for the VX memory layer.",
   "owner": {
-    "name": "Vessel Tech Inc",
-    "email": "support@vessel.nyc"
+    "name": "One Memory Inc",
+    "email": "support@onememory.dev"
   },
   "plugins": [
     {

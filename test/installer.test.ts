@@ -65,7 +65,7 @@ describe("installer helpers", () => {
     );
 
     expect(config.command).toBe("npx");
-    expect(config.args).toEqual(["-y", "@vesselnyc/mcp-server@latest", "mcp"]);
+    expect(config.args).toEqual(["-y", "vx-mcp-server@latest", "mcp"]);
     expect(config.env).toEqual({
       VX_API_BASE_URL: "https://api.vx.dev/v1",
       VX_BEARER_TOKEN: "vx-token",
@@ -112,7 +112,7 @@ describe("installer helpers", () => {
     );
 
     expect(block).toContain('command = "npx"');
-    expect(block).toContain('args = ["-y", "@vesselnyc/mcp-server@latest", "mcp"]');
+    expect(block).toContain('args = ["-y", "vx-mcp-server@latest", "mcp"]');
     expect(block).toContain('VX_API_BASE_URL = "https://api.vx.dev/v1"');
     expect(block).toContain('VX_API_KEY = "test-api-key"');
     expect(block).toContain('VX_NAME = "VX"');
@@ -159,7 +159,7 @@ describe("installer helpers", () => {
     );
 
     expect(config.$schema).toBe("https://opencode.ai/config.json");
-    expect(config.mcp.vx.command).toEqual(["npx", "-y", "@vesselnyc/mcp-server@latest", "mcp"]);
+    expect(config.mcp.vx.command).toEqual(["npx", "-y", "vx-mcp-server@latest", "mcp"]);
     expect(config.mcp.vx.env.VX_SOURCE).toBe("opencode");
   });
 
@@ -190,7 +190,7 @@ describe("installer helpers", () => {
     }));
 
     expect(artifact.kind).toBe("shell");
-    expect(artifact.content).toBe("amp mcp add vx -- npx -y @vesselnyc/mcp-server@latest mcp");
+    expect(artifact.content).toBe("amp mcp add vx -- npx -y vx-mcp-server@latest mcp");
   });
 
   it("keeps the Codex managed block idempotent", () => {
@@ -296,7 +296,7 @@ describe("installClaude", () => {
     expect(parsedConfig).toEqual({
       type: "stdio",
       command: "npx",
-      args: ["-y", "@vesselnyc/mcp-server@latest", "mcp"],
+      args: ["-y", "vx-mcp-server@latest", "mcp"],
       env: {
         VX_API_BASE_URL: "https://api.vx.dev/v1",
         VX_API_KEY: "test-api-key",
@@ -350,7 +350,7 @@ describe("installOpenClaw", () => {
     expect(vi.mocked(deps.spawnSync).mock.calls[1]?.[1]).toEqual([
       "plugins",
       "install",
-      "@vesselnyc/mcp-server@latest",
+      "vx-mcp-server@latest",
     ]);
     expect(notes.join("\n")).toContain('"storeOnRequestOnly": false');
   });

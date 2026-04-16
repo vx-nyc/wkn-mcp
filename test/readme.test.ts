@@ -7,11 +7,11 @@ describe("README smoke checks", () => {
   it("documents the primary install flows and shipped assets", () => {
     const readme = readFileSync(join(process.cwd(), "README.md"), "utf8");
 
-    expect(readme).toContain("npx @vesselnyc/mcp-server install claude");
-    expect(readme).toContain("npx @vesselnyc/mcp-server install codex");
+    expect(readme).toContain("npx vx-mcp-server install claude");
+    expect(readme).toContain("npx vx-mcp-server install codex");
     expect(readme).toContain("### Cursor");
-    expect(readme).toContain("openclaw plugins install @vesselnyc/mcp-server");
-    expect(readme).toContain("\"args\": [\"-y\", \"@vesselnyc/mcp-server@latest\", \"mcp\"]");
+    expect(readme).toContain("openclaw plugins install vx-mcp-server");
+    expect(readme).toContain("\"args\": [\"-y\", \"vx-mcp-server@latest\", \"mcp\"]");
     expect(readme).toContain("VX_API_BASE_URL");
     expect(readme).toContain("VX_NAME");
     expect(readme).toContain("VX_SOURCE");

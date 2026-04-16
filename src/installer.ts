@@ -14,7 +14,7 @@ import {
   VX_DEFAULT_API_BASE_URL,
   VX_DEFAULT_MAX_TOKENS,
   VX_DEFAULT_NAME,
-  VX_NPM_PACKAGE_SPEC,
+  VX_PACKAGE_SPEC,
 } from "./constants.js";
 import { handleKeysCli } from "./keys.js";
 import { handleMigrateCli } from "./migrate.js";
@@ -132,7 +132,7 @@ function resolveCredentialEnv(
 export function getPackagedLauncher(): PackagedLauncher {
   return {
     command: "npx",
-    args: ["-y", VX_NPM_PACKAGE_SPEC, "mcp"],
+    args: ["-y", VX_PACKAGE_SPEC, "mcp"],
   };
 }
 
@@ -354,7 +354,7 @@ export function buildClientInstallArtifact(
         kind: "json",
         content: toPrettyJson(buildClaudeMcpConfigObject(launcher, env)),
         notes: [
-          "Managed install is available with: npx @vesselnyc/mcp-server install claude",
+          "Managed install is available with: npx vx-mcp-server install claude",
           "Manual registration uses: claude mcp add-json --scope user vx '<payload>'",
         ],
       };
@@ -366,7 +366,7 @@ export function buildClientInstallArtifact(
         destination: "~/.codex/config.toml",
         content: buildCodexTomlBlock(launcher, env),
         notes: [
-          "Managed install is available with: npx @vesselnyc/mcp-server install codex",
+          "Managed install is available with: npx vx-mcp-server install codex",
         ],
       };
     case "cursor":
@@ -388,7 +388,7 @@ export function buildClientInstallArtifact(
         kind: "json",
         content: toPrettyJson(buildOpenClawPluginConfigObject(env)),
         notes: [
-          `Install plugin with: openclaw plugins install ${VX_NPM_PACKAGE_SPEC}`,
+          `Install plugin with: openclaw plugins install ${VX_PACKAGE_SPEC}`,
           "Restart the gateway after enabling the plugin.",
         ],
       };
@@ -653,7 +653,7 @@ export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
   const openclawCli = findCli("openclaw", deps);
   if (!openclawCli) {
     notes.push(
-      `OpenClaw CLI (\`openclaw\`) was not found, so automatic plugin installation was skipped. Run \`openclaw plugins install ${VX_NPM_PACKAGE_SPEC}\` manually.`
+      `OpenClaw CLI (\`openclaw\`) was not found, so automatic plugin installation was skipped. Run \`openclaw plugins install ${VX_PACKAGE_SPEC}\` manually.`
     );
     notes.push(artifact.content);
     return notes;
@@ -661,13 +661,13 @@ export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
 
   const installResult = deps.spawnSync(
     openclawCli,
-    ["plugins", "install", VX_NPM_PACKAGE_SPEC],
+    ["plugins", "install", VX_PACKAGE_SPEC],
     { encoding: "utf8" }
   );
 
   if (installResult.status === 0) {
     notes.push(
-      `Installed the VX plugin for OpenClaw with \`openclaw plugins install ${VX_NPM_PACKAGE_SPEC}\`.`
+      `Installed the VX plugin for OpenClaw with \`openclaw plugins install ${VX_PACKAGE_SPEC}\`.`
     );
   } else {
     notes.push(
@@ -676,7 +676,7 @@ export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
       }`
     );
     notes.push(
-      `You can retry manually with: openclaw plugins install ${VX_NPM_PACKAGE_SPEC}`
+      `You can retry manually with: openclaw plugins install ${VX_PACKAGE_SPEC}`
     );
   }
 

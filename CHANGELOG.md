@@ -50,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Release-readiness coverage for installers, prompts, OpenClaw config/runtime, README consistency, and runtime config normalization.
 
 ### Changed
-- Claude and Codex adapters now register the packaged server as `npx -y @vesselnyc/mcp-server@latest mcp`.
+- Claude and Codex adapters now register the packaged server as `npx -y vx-mcp-server@latest mcp`.
 - Host source tags are now specific to the integration, including `claude-code`, `claude-desktop`, `codex`, and `openclaw`.
 - `VX_API_BASE_URL` is now the canonical config output for new installs and docs, while `VX_API_URL` remains a backward-compatible runtime fallback.
 - Shared VX tool execution now flows through one runtime path used by both MCP and OpenClaw integrations.

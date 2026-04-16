@@ -5,7 +5,7 @@
   "mcpServers": {
     "vx": {
       "command": "npx",
-      "args": ["-y", "@vesselnyc/mcp-server@latest", "mcp"],
+      "args": ["-y", "vx-mcp-server@latest", "mcp"],
       "env": {
         "VX_API_BASE_URL": "https://api.vx.dev/v1",
         "VX_NAME": "VX",

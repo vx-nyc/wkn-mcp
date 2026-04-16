@@ -1,6 +1,7 @@
 {
-  "name": "@vesselnyc/mcp-server",
+  "name": "vx-mcp-server",
   "version": "0.5.8",
+  "private": true,
   "description": "Plugin-first VX memory for Claude, Codex, OpenClaw, and other MCP clients.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -34,7 +35,7 @@
     "check:secrets": "bash scripts/check-no-secrets.sh",
     "generate-certs": "bash scripts/generate-certs.sh",
     "start:https": "VX_MCP_TRANSPORT=http VX_MCP_HTTPS=1 VX_MCP_HTTPS_KEY_PATH=./certs/mcp-key.pem VX_MCP_HTTPS_CERT_PATH=./certs/mcp-cert.pem VX_MCP_HTTP_HOST=0.0.0.0 VX_MCP_HTTP_PORT=3100 VX_MCP_OAUTH_CLIENT_ID=vx-mcp-demo VX_MCP_OAUTH_CLIENT_SECRET=demo-secret-change-me VX_API_BASE_URL=http://localhost:3000/v1 VX_BEARER_TOKEN=vx_test_local_00000000000000000000000000000000 node dist/index.js",
-    "prepublishOnly": "npm run build && npm run check:secrets"
+    "check:all": "npm run build && npm run check:secrets"
   },
   "keywords": [
     "mcp",
@@ -70,17 +71,16 @@
     "gpt"
   ],
   "author": {
-    "name": "Vessel Tech Inc",
-    "url": "https://vessel.nyc"
+    "name": "One Memory Inc"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vx-nyc/vx-mcp.git"
+    "url": "git+https://github.com/vx-nyc/client.git"
   },
-  "homepage": "https://vessel.nyc",
+  "homepage": "https://github.com/vx-nyc/client",
   "bugs": {
-    "url": "https://github.com/vx-nyc/vx-mcp/issues"
+    "url": "https://github.com/vx-nyc/client/issues"
   },
   "funding": {
     "type": "github",
