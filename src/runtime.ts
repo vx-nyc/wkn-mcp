@@ -4,12 +4,24 @@ import {
   handleVxContextsCreate,
   handleVxContextsList,
   handleVxDelete,
+  handleVxGet,
   handleVxImportBatch,
   handleVxImportText,
   handleVxList,
   handleVxQuery,
   handleVxRecall,
   handleVxStore,
+  handleVxImportChatGPT,
+  handleVxImportAnthropic,
+  handleVxCascadeQuery,
+  handleVxEntityMerge,
+  handleVxContextsEmergentList,
+  handleVxContextsCreateFromDescription,
+  handleVxContextsActivate,
+  handleVxContextsDeactivate,
+  handleVxSkillsFind,
+  handleVxSkillsInvoke,
+  handleVxHealthStatus,
   type VxClientLike,
 } from "./handlers.js";
 import {
@@ -182,6 +194,8 @@ export async function executeVxOperation(
       return handleVxList(client, args as Parameters<typeof handleVxList>[1]);
     case "vx_delete":
       return handleVxDelete(client, args as Parameters<typeof handleVxDelete>[1]);
+    case "vx_get":
+      return handleVxGet(client, args as Parameters<typeof handleVxGet>[1]);
     case "vx_context":
       return handleVxContext(client, {
         maxTokens: config.maxTokens,
@@ -208,6 +222,61 @@ export async function executeVxOperation(
         client,
         args as Parameters<typeof handleVxImportBatch>[1],
         meta
+      );
+    case "vx_import_chatgpt":
+      return handleVxImportChatGPT(
+        client,
+        args as Parameters<typeof handleVxImportChatGPT>[1]
+      );
+    case "vx_import_anthropic":
+      return handleVxImportAnthropic(
+        client,
+        args as Parameters<typeof handleVxImportAnthropic>[1]
+      );
+    case "vx_cascade_query":
+      return handleVxCascadeQuery(
+        client,
+        args as Parameters<typeof handleVxCascadeQuery>[1]
+      );
+    case "vx_entity_merge":
+      return handleVxEntityMerge(
+        client,
+        args as Parameters<typeof handleVxEntityMerge>[1]
+      );
+    case "vx_contexts_emergent_list":
+      return handleVxContextsEmergentList(
+        client,
+        args as Parameters<typeof handleVxContextsEmergentList>[1]
+      );
+    case "vx_contexts_create_from_description":
+      return handleVxContextsCreateFromDescription(
+        client,
+        args as Parameters<typeof handleVxContextsCreateFromDescription>[1]
+      );
+    case "vx_contexts_activate":
+      return handleVxContextsActivate(
+        client,
+        args as Parameters<typeof handleVxContextsActivate>[1]
+      );
+    case "vx_contexts_deactivate":
+      return handleVxContextsDeactivate(
+        client,
+        args as Parameters<typeof handleVxContextsDeactivate>[1]
+      );
+    case "vx_skills_find":
+      return handleVxSkillsFind(
+        client,
+        args as Parameters<typeof handleVxSkillsFind>[1]
+      );
+    case "vx_skills_invoke":
+      return handleVxSkillsInvoke(
+        client,
+        args as Parameters<typeof handleVxSkillsInvoke>[1]
+      );
+    case "vx_health_status":
+      return handleVxHealthStatus(
+        client,
+        args as Parameters<typeof handleVxHealthStatus>[1]
       );
   }
 }

@@ -284,6 +284,143 @@ export type MultiQueryInput = {
   deduplicate?: boolean;
 };
 
+// Phase 2 signal-first types
+
+export type ImportChatGPTInput = {
+  path: string;
+  dryRun?: boolean;
+  limit?: number;
+};
+
+export type ImportAnthropicInput = {
+  path: string;
+  dryRun?: boolean;
+  limit?: number;
+};
+
+export type ImportIngestResponse = {
+  jobId?: string;
+  provider?: string;
+  prepared?: number;
+  imported?: number;
+  dryRun?: boolean;
+  errors?: Array<{ index: number; error: string }>;
+  summary?: Record<string, unknown>;
+};
+
+export type CascadeQueryInput = {
+  query: string;
+  contexts?: string[];
+  counterparty?: CounterpartyIdentity;
+  channels?: string[];
+  limit?: number;
+};
+
+export type CascadeQueryResponse = {
+  memories: VxMemory[];
+  total: number;
+  meta?: {
+    queryId?: string;
+    channels?: string[];
+    coverage?: Record<string, number>;
+    [key: string]: unknown;
+  };
+};
+
+export type EntityMergeInput = {
+  canonical: string;
+  aliases: string[];
+  confidence: number;
+  confirm: boolean;
+};
+
+export type EntityMergeResponse = {
+  id?: string;
+  canonical: string;
+  aliases: string[];
+  confidence?: number;
+  merged?: boolean;
+  pending?: boolean;
+};
+
+export type EmergentContextListInput = {
+  minSize?: number;
+  limit?: number;
+};
+
+export type EmergentContextInfo = {
+  name: string;
+  description?: string;
+  size?: number;
+  active?: boolean;
+  confidence?: number;
+  [key: string]: unknown;
+};
+
+export type EmergentContextListResponse = {
+  contexts: EmergentContextInfo[];
+  total: number;
+};
+
+export type CreateContextFromDescriptionInput = {
+  name: string;
+  description: string;
+};
+
+export type ActivateContextResponse = {
+  name: string;
+  active: boolean;
+};
+
+export type SkillsFindInput = {
+  triggerQuery: string;
+  limit?: number;
+};
+
+export type SkillDescriptor = {
+  id?: string;
+  name: string;
+  description?: string;
+  trigger?: string;
+  score?: number;
+  memoryId?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type SkillsFindResponse = {
+  skills: SkillDescriptor[];
+  total: number;
+};
+
+export type SkillInvokeInput = {
+  name: string;
+  execute?: boolean;
+};
+
+export type SkillInvokeResponse = {
+  name: string;
+  invoked: boolean;
+  executed?: boolean;
+  result?: unknown;
+  steps?: Array<Record<string, unknown>>;
+  memoryId?: string;
+};
+
+export type HealthDetailedComponent = {
+  status?: string;
+  message?: string;
+  [key: string]: unknown;
+};
+
+export type HealthDetailedResponse = {
+  status: string;
+  version?: string;
+  uptime?: number;
+  components?: Record<string, HealthDetailedComponent>;
+  checks?: Record<string, HealthDetailedComponent>;
+  [key: string]: unknown;
+};
+
 export type VxClientConfig = {
   apiBaseUrl: string;
   apiKey?: string;
@@ -778,6 +915,12 @@ export class VxApiClient {
     });
   }
 
+  async getMemoryById(id: string): Promise<VxMemory> {
+    return this.request<VxMemory>(`/memories/${encodeURIComponent(id)}`, {
+      method: 'GET',
+    });
+  }
+
   async deleteMemory(id: string): Promise<void> {
     await this.requestEnvelope(`/memories/${encodeURIComponent(id)}`, {
       method: 'DELETE',
@@ -981,6 +1124,210 @@ export class VxApiClient {
     return this.request('/query/stats', {
       method: 'GET',
     });
+  }
+
+  // ==========================================================================
+  // Phase 2 signal-first: ingestion, retrieval cascade, entities, emergent
+  // contexts, skills, and detailed health. These wrap the HTTP routes listed
+  // in the implementation plan §7.2/§7.3. Each method is a thin adapter over
+  // `request`/`requestEnvelope` using the existing auth headers.
+  // ==========================================================================
+
+  async importChatGPT(input: ImportChatGPTInput): Promise<ImportIngestResponse> {
+    return this.request<ImportIngestResponse>('/ingest/chatgpt', {
+      method: 'POST',
+      body: JSON.stringify(compactRecord({
+        path: input.path,
+        dryRun: input.dryRun,
+        limit: input.limit,
+      })),
+    });
+  }
+
+  async importAnthropic(input: ImportAnthropicInput): Promise<ImportIngestResponse> {
+    return this.request<ImportIngestResponse>('/ingest/anthropic', {
+      method: 'POST',
+      body: JSON.stringify(compactRecord({
+        path: input.path,
+        dryRun: input.dryRun,
+        limit: input.limit,
+      })),
+    });
+  }
+
+  async cascadeQuery(input: CascadeQueryInput): Promise<CascadeQueryResponse> {
+    const envelope = await this.requestEnvelope<CascadeQueryResponse | QueryResponse>(
+      '/retrieval/cascade',
+      {
+        method: 'POST',
+        body: JSON.stringify(compactRecord({
+          query: input.query,
+          contexts: input.contexts,
+          counterparty: input.counterparty,
+          channels: input.channels,
+          limit: input.limit,
+        })),
+      },
+    );
+    const data = envelope.data as Partial<CascadeQueryResponse>;
+    const memories = Array.isArray(data?.memories) ? data.memories : [];
+    return {
+      memories,
+      total: data?.total ?? memories.length,
+      meta: (envelope as { meta?: Record<string, unknown> }).meta as
+        | CascadeQueryResponse['meta']
+        | undefined,
+    };
+  }
+
+  async mergeEntities(input: EntityMergeInput): Promise<EntityMergeResponse> {
+    return this.request<EntityMergeResponse>('/entities/merge', {
+      method: 'POST',
+      body: JSON.stringify(compactRecord({
+        canonical: input.canonical,
+        aliases: input.aliases,
+        confidence: input.confidence,
+        confirm: input.confirm,
+      })),
+    });
+  }
+
+  async listEmergentContexts(
+    params?: EmergentContextListInput,
+  ): Promise<EmergentContextListResponse> {
+    const q = new URLSearchParams();
+    if (params?.minSize != null) q.set('minSize', String(params.minSize));
+    if (params?.limit != null) q.set('limit', String(params.limit));
+    const path = `/contexts/emergent${q.toString() ? `?${q.toString()}` : ''}`;
+    const envelope = await this.requestEnvelope<EmergentContextInfo[] | EmergentContextListResponse>(
+      path,
+      { method: 'GET' },
+    );
+    const data = envelope.data;
+    if (Array.isArray(data)) {
+      const meta = (envelope as { meta?: { total?: number } }).meta;
+      return {
+        contexts: data,
+        total: meta?.total ?? data.length,
+      };
+    }
+    const contexts = Array.isArray((data as EmergentContextListResponse)?.contexts)
+      ? (data as EmergentContextListResponse).contexts
+      : [];
+    return {
+      contexts,
+      total: (data as EmergentContextListResponse)?.total ?? contexts.length,
+    };
+  }
+
+  async createContextFromDescription(
+    input: CreateContextFromDescriptionInput,
+  ): Promise<VxKnowledgeContext> {
+    return this.request<VxKnowledgeContext>('/contexts/from-description', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: input.name,
+        description: input.description,
+      }),
+    });
+  }
+
+  async activateContext(name: string): Promise<ActivateContextResponse> {
+    const data = await this.request<Partial<ActivateContextResponse> | undefined>(
+      `/contexts/${encodeURIComponent(name)}/activate`,
+      { method: 'POST' },
+    );
+    return {
+      name: data?.name ?? name,
+      active: data?.active ?? true,
+    };
+  }
+
+  async deactivateContext(name: string): Promise<ActivateContextResponse> {
+    const data = await this.request<Partial<ActivateContextResponse> | undefined>(
+      `/contexts/${encodeURIComponent(name)}/deactivate`,
+      { method: 'POST' },
+    );
+    return {
+      name: data?.name ?? name,
+      active: data?.active ?? false,
+    };
+  }
+
+  /**
+   * Find skills via the retrieval cascade + a server-side post-filter
+   * (`metadata.vx_skill.kind === "skill"` with trigger match). The API
+   * exposes this under POST /v1/skills/find. If the server does not
+   * expose a dedicated endpoint, callers can fall back to cascadeQuery
+   * directly with `channels: ["bm25", "ner-walk"]`.
+   */
+  async findSkills(input: SkillsFindInput): Promise<SkillsFindResponse> {
+    const envelope = await this.requestEnvelope<SkillsFindResponse | { skills?: SkillDescriptor[] }>(
+      '/skills/find',
+      {
+        method: 'POST',
+        body: JSON.stringify(compactRecord({
+          triggerQuery: input.triggerQuery,
+          limit: input.limit,
+        })),
+      },
+    );
+    const data = envelope.data as Partial<SkillsFindResponse>;
+    const skills = Array.isArray(data?.skills) ? data.skills : [];
+    return {
+      skills,
+      total: data?.total ?? skills.length,
+    };
+  }
+
+  async invokeSkill(input: SkillInvokeInput): Promise<SkillInvokeResponse> {
+    const data = await this.request<Partial<SkillInvokeResponse> | undefined>(
+      `/skills/${encodeURIComponent(input.name)}/invoke`,
+      {
+        method: 'POST',
+        body: JSON.stringify(compactRecord({
+          execute: input.execute,
+        })),
+      },
+    );
+    return {
+      name: data?.name ?? input.name,
+      invoked: data?.invoked ?? true,
+      executed: data?.executed,
+      result: data?.result,
+      steps: data?.steps,
+      memoryId: data?.memoryId,
+    };
+  }
+
+  /**
+   * Detailed health report. Calls GET /v1/health/detailed and returns the
+   * full payload so callers can surface component-by-component status.
+   */
+  async healthDetailed(): Promise<HealthDetailedResponse> {
+    await waitForVxApiInternal(this.baseUrl, getHealthOptions(this.config));
+    const url = `${this.baseUrl}/health/detailed`;
+    const response = await withTimeout(
+      fetch(url, {
+        method: 'GET',
+        headers: buildRequestHeaders(this.config),
+      }),
+      this.timeoutMs,
+    );
+    const body = (await response.json().catch(() => ({}))) as
+      | HealthDetailedResponse
+      | VxEnvelope<HealthDetailedResponse>
+      | Record<string, unknown>;
+    if (!response.ok) {
+      const message =
+        (body as VxEnvelope<HealthDetailedResponse>)?.error?.message ||
+        `HTTP ${response.status}`;
+      throw new Error(`VX API error at /health/detailed: ${message}`);
+    }
+    if (body && typeof body === 'object' && 'data' in body && body.data) {
+      return body.data as HealthDetailedResponse;
+    }
+    return body as HealthDetailedResponse;
   }
 }
 

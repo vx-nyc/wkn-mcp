@@ -6,11 +6,23 @@ export type VxToolName =
   | "vx_query"
   | "vx_list"
   | "vx_delete"
+  | "vx_get"
   | "vx_context"
   | "vx_contexts_list"
   | "vx_contexts_create"
   | "vx_import_text"
-  | "vx_import_batch";
+  | "vx_import_batch"
+  | "vx_import_chatgpt"
+  | "vx_import_anthropic"
+  | "vx_cascade_query"
+  | "vx_entity_merge"
+  | "vx_contexts_emergent_list"
+  | "vx_contexts_create_from_description"
+  | "vx_contexts_activate"
+  | "vx_contexts_deactivate"
+  | "vx_skills_find"
+  | "vx_skills_invoke"
+  | "vx_health_status";
 
 export type VxPromptName = "vx_memory_workflow" | "vx_memory_import";
 
@@ -44,11 +56,23 @@ export const VX_TOOL_NAMES: readonly VxToolName[] = [
   "vx_query",
   "vx_list",
   "vx_delete",
+  "vx_get",
   "vx_context",
   "vx_contexts_list",
   "vx_contexts_create",
   "vx_import_text",
   "vx_import_batch",
+  "vx_import_chatgpt",
+  "vx_import_anthropic",
+  "vx_cascade_query",
+  "vx_entity_merge",
+  "vx_contexts_emergent_list",
+  "vx_contexts_create_from_description",
+  "vx_contexts_activate",
+  "vx_contexts_deactivate",
+  "vx_skills_find",
+  "vx_skills_invoke",
+  "vx_health_status",
 ] as const;
 
 export function getHostLabel(source: string): string {
@@ -184,6 +208,12 @@ export function getVxToolDefinitions(config: VxCatalogConfig): VxToolDefinition[
           counterpartySession: {
             type: "string",
             description: "Optional session or thread identifier for the interaction.",
+          },
+          metadata: {
+            type: "object",
+            description:
+              "Optional free-form metadata merged into the stored memory. Use a namespaced key (for example `vx_skill`) to avoid collisions with VX-managed fields.",
+            additionalProperties: true,
           },
         },
         required: ["content"],
@@ -337,6 +367,21 @@ export function getVxToolDefinitions(config: VxCatalogConfig): VxToolDefinition[
       },
     },
     {
+      name: "vx_get",
+      description:
+        "Fetch a single VX memory by ID, including its metadata. Use this to resolve references such as skill step IDs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            description: "The VX memory ID to fetch.",
+          },
+        },
+        required: ["id"],
+      },
+    },
+    {
       name: "vx_context",
       description: getContextDescription(config.source),
       inputSchema: {
@@ -478,6 +523,244 @@ export function getVxToolDefinitions(config: VxCatalogConfig): VxToolDefinition[
           },
         },
         required: ["memories"],
+      },
+    },
+    {
+      name: "vx_import_chatgpt",
+      description:
+        "Ingest a ChatGPT conversations export into VX. Accepts a path to a conversations.json (or compatible) file on disk that the API can read; supports a dry-run preview and a row limit.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Absolute or server-accessible path to the ChatGPT export file (for example `conversations.json`).",
+          },
+          dryRun: {
+            type: "boolean",
+            description: "If true, prepare and summarize the import without persisting memories.",
+            default: false,
+          },
+          limit: {
+            type: "number",
+            description: "Optional maximum number of conversations or rows to ingest.",
+          },
+        },
+        required: ["path"],
+      },
+    },
+    {
+      name: "vx_import_anthropic",
+      description:
+        "Ingest an Anthropic/Claude conversations export into VX. Accepts a path to the export file that the API can read; supports dry-run preview and a row limit.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Absolute or server-accessible path to the Anthropic/Claude export file.",
+          },
+          dryRun: {
+            type: "boolean",
+            description: "If true, prepare and summarize the import without persisting memories.",
+            default: false,
+          },
+          limit: {
+            type: "number",
+            description: "Optional maximum number of conversations or rows to ingest.",
+          },
+        },
+        required: ["path"],
+      },
+    },
+    {
+      name: "vx_cascade_query",
+      description:
+        "Run a signal-first retrieval cascade over VX memory. Use this for recall that should combine BM25, vector, entity-graph walks, and temporal channels; returns top memories plus retrieval meta including `queryId` for later explain.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Focused retrieval query.",
+          },
+          contexts: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional knowledge context filters.",
+          },
+          counterparty: {
+            type: "object",
+            description: "Optional counterparty identity (person, bot, agent, or subagent) to bias retrieval.",
+            properties: {
+              id: { type: "string" },
+              kind: { type: "string" },
+              client: { type: "string" },
+              session: { type: "string" },
+            },
+            required: ["id"],
+          },
+          channels: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional list of retrieval channels to enable (for example `bm25`, `vector`, `ner-walk`, `temporal`). Omit to use the server default.",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of results (default: 10).",
+            default: 10,
+          },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "vx_entity_merge",
+      description:
+        "Merge a set of entity aliases into a canonical entity. Requires explicit confirmation because this rewrites canonical identity links across signals.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          canonical: {
+            type: "string",
+            description: "The canonical entity name or identifier to merge aliases into.",
+          },
+          aliases: {
+            type: "array",
+            items: { type: "string" },
+            description: "List of alias names or IDs to collapse under the canonical entity.",
+          },
+          confidence: {
+            type: "number",
+            minimum: 0,
+            maximum: 1,
+            description: "Confidence score (0-1) for this merge.",
+          },
+          confirm: {
+            type: "boolean",
+            description: "Must be set to true to apply the merge. Omit or set false to preview only.",
+            default: false,
+          },
+        },
+        required: ["canonical", "aliases", "confidence", "confirm"],
+      },
+    },
+    {
+      name: "vx_contexts_emergent_list",
+      description:
+        "List emergent (auto-discovered) knowledge contexts proposed by VX community detection. Use this to inspect proposed context clusters before activating them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          minSize: {
+            type: "number",
+            description: "Minimum cluster size to include.",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of emergent contexts to return (default: 20).",
+            default: 20,
+          },
+        },
+      },
+    },
+    {
+      name: "vx_contexts_create_from_description",
+      description:
+        "Create a knowledge context from a natural-language description. VX interprets the description into a structured context definition.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Target context path, for example `work/project-alpha`.",
+          },
+          description: {
+            type: "string",
+            description: "Natural-language description of what belongs in this context.",
+          },
+        },
+        required: ["name", "description"],
+      },
+    },
+    {
+      name: "vx_contexts_activate",
+      description:
+        "Activate a knowledge context so it participates in retrieval, scoped queries, and cascade results.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Context name to activate.",
+          },
+        },
+        required: ["name"],
+      },
+    },
+    {
+      name: "vx_contexts_deactivate",
+      description:
+        "Deactivate a knowledge context so it is excluded from retrieval and cascade results.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Context name to deactivate.",
+          },
+        },
+        required: ["name"],
+      },
+    },
+    {
+      name: "vx_skills_find",
+      description:
+        "Find skills in VX whose trigger matches the given query. Use this when the user asks how to do something that may already be captured as a reusable VX skill.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          triggerQuery: {
+            type: "string",
+            description: "Natural-language phrase describing the user's intent or goal.",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of skills to return (default: 5).",
+            default: 5,
+          },
+        },
+        required: ["triggerQuery"],
+      },
+    },
+    {
+      name: "vx_skills_invoke",
+      description:
+        "Invoke a named VX skill. Set `execute: false` to dry-run (preview the plan without side-effects); set `execute: true` to run the skill.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "The VX skill name or identifier to invoke.",
+          },
+          execute: {
+            type: "boolean",
+            description: "If true, actually execute the skill. Default false (preview only).",
+            default: false,
+          },
+        },
+        required: ["name"],
+      },
+    },
+    {
+      name: "vx_health_status",
+      description:
+        "Fetch the detailed VX health report (DB, Redis, retrieval, worker, model, etc.). Use this when diagnosing problems or confirming readiness of the memory layer.",
+      inputSchema: {
+        type: "object",
+        properties: {},
       },
     },
   ];
