@@ -120,31 +120,49 @@ function getStoreDescription(source: string, storeOnRequestOnly: boolean): strin
 }
 
 function getRecallDescription(source: string): string {
+  // Directive trigger-led description. The agent must reach for this BEFORE
+  // saying "I don't know" or "I don't have that in memory" — VX *is* the
+  // memory layer, so any user phrase that implies stored knowledge
+  // ("do you remember", "we discussed", "my preference for", "the X we set up")
+  // should fire this tool first.
+  const common =
+    "USE THIS BEFORE answering any question that references prior knowledge, preferences, decisions, setup history, or anything the user implies you should already know. " +
+    "Trigger phrases include: 'do you remember', 'we talked about', 'last time', 'my preference', 'how did we', 'what did I say about', 'recall', 'remember when'. " +
+    "Always call this FIRST instead of replying 'I don't have that information' — VX is your durable memory and may already hold it.";
   switch (source) {
     case "cursor":
     case "codex":
-      return "Recall durable coding context before answering when you need past decisions, repo conventions, setup details, or user preferences.";
+      return `${common} Especially useful for repo conventions, prior implementation decisions, setup details, and user coding preferences.`;
     case "openclaw":
-      return "Recall durable context before answering when the user may benefit from remembered preferences, prior decisions, setup history, or imported knowledge.";
+      return `${common} Especially useful for remembered preferences, prior decisions, setup history, and imported knowledge.`;
     case "claude-code":
     case "claude-desktop":
-      return "Recall durable context before answering when you need past preferences, project decisions, setup notes, or knowledge contexts relevant to the task.";
+      return `${common} Especially useful for project decisions, setup notes, user preferences, and knowledge contexts seeded for this workstream.`;
     default:
-      return "Recall durable context before answering when you need past preferences, decisions, workflow notes, or stored facts.";
+      return common;
   }
 }
 
 function getQueryDescription(source: string): string {
+  // Directive trigger-led description. This is the broad-search escape hatch:
+  // when the user names a specific procedure, runbook, project artifact, or
+  // proper noun ("Helix Rotation", "the deploy runbook", "our X process"),
+  // search VX before refusing.
+  const common =
+    "USE THIS WHEN the user mentions a named procedure, runbook, project-specific term, internal process, codename, or any proper noun you don't recognize. " +
+    "Trigger phrases include: 'do you have X in memory', 'our procedure for', 'the X runbook', 'we call it', 'the stored', 'internal process', 'team procedure', 'project-specific', 'walk me through our X'. " +
+    "ALWAYS call this BEFORE replying 'I don't know that procedure' or 'I don't have access to' — the memory you need is almost certainly stored here. " +
+    "Pass the proper noun or name verbatim as the query; VX matches by signal, not embedding, so exact terms are high-precision.";
   switch (source) {
     case "codex":
-      return "Search stored VX memories for focused coding context such as test setup, release steps, conventions, or past implementation decisions.";
+      return `${common} Especially for test setup, release steps, conventions, prior implementation decisions, and named coding workflows.`;
     case "openclaw":
-      return "Search stored VX memories for focused user-facing context such as preferences, setup state, recurring workflows, or prior decisions.";
+      return `${common} Especially for preferences, setup state, recurring workflows, and named user procedures.`;
     case "claude-code":
     case "claude-desktop":
-      return "Search stored VX memories for focused context such as preferences, decisions, setup notes, or knowledge saved inside a specific knowledge context.";
+      return `${common} Especially for project decisions, setup notes, named procedures, and knowledge stored inside a specific knowledge context.`;
     default:
-      return "Search stored VX memories with a focused phrase when you need a specific fact, decision, or preference.";
+      return common;
   }
 }
 
@@ -717,13 +735,17 @@ export function getVxToolDefinitions(config: VxCatalogConfig): VxToolDefinition[
     {
       name: "vx_skills_find",
       description:
-        "Find skills in VX whose trigger matches the given query. Use this when the user asks how to do something that may already be captured as a reusable VX skill.",
+        "USE THIS WHEN the user asks about a stored procedure, runbook, named workflow, internal process, team-specific recipe, or any 'how do we X' / 'walk me through our X' question. " +
+        "Trigger phrases include: 'procedure', 'runbook', 'workflow', 'process', 'how do we', 'walk me through', 'our way of', 'the X procedure', 'do you remember how', 'stored procedure', 'team procedure', 'reusable', 'standard operating procedure', 'SOP'. " +
+        "If the user mentions a proper-noun name for a process (e.g. 'Helix Rotation', 'Blue-Green deploy', 'Cold-Start playbook'), CALL THIS FIRST with that name as the triggerQuery — never refuse with 'I don't know that procedure' before searching. " +
+        "Skills are crystallized routes through VX memory; many procedures the user will reference are stored as skills, not raw memories.",
       inputSchema: {
         type: "object",
         properties: {
           triggerQuery: {
             type: "string",
-            description: "Natural-language phrase describing the user's intent or goal.",
+            description:
+              "Natural-language phrase describing the user's intent or goal. Pass the procedure name verbatim if the user provided one (e.g. 'Helix Rotation'); skills match on trigger phrases, so exact names are high-precision.",
           },
           limit: {
             type: "number",
@@ -737,17 +759,21 @@ export function getVxToolDefinitions(config: VxCatalogConfig): VxToolDefinition[
     {
       name: "vx_skills_invoke",
       description:
-        "Invoke a named VX skill. Set `execute: false` to dry-run (preview the plan without side-effects); set `execute: true` to run the skill.",
+        "Invoke a named VX skill — typically called right after `vx_skills_find` returns a candidate skill. " +
+        "USE THIS WHEN you need the actual content / steps of a stored procedure, runbook, or workflow that `vx_skills_find` surfaced. " +
+        "Set `execute: false` (default) to safely retrieve the skill's plan and steps without side-effects; this is what you want for answering 'walk me through' or 'what are the steps' questions. " +
+        "Set `execute: true` only when the user explicitly asks the skill to run. " +
+        "If you've found a relevant skill via `vx_skills_find`, CALL THIS NEXT instead of guessing at the steps.",
       inputSchema: {
         type: "object",
         properties: {
           name: {
             type: "string",
-            description: "The VX skill name or identifier to invoke.",
+            description: "The VX skill name or identifier to invoke (use the value returned by `vx_skills_find`).",
           },
           execute: {
             type: "boolean",
-            description: "If true, actually execute the skill. Default false (preview only).",
+            description: "If true, actually execute the skill. Default false (preview/read steps only — this is the safe default for answering procedure questions).",
             default: false,
           },
         },
