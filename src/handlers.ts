@@ -120,11 +120,14 @@ export async function handleVxStore(
     source: meta.source,
     counterparty,
     metadata: {
+      // Caller metadata first so reserved provenance keys below cannot be
+      // overwritten by user-supplied values (audit-trail / source-attribution
+      // depend on these being trustworthy).
+      ...(args.metadata || {}),
       source: meta.source,
       vxName: meta.name,
       client: meta.client ?? "mcp-server",
       version: VX_MCP_SERVER_VERSION,
-      ...(args.metadata || {}),
     },
   };
   if (typeof args.importance === "number") {
