@@ -6,11 +6,23 @@ export type VxToolName =
   | "vx_query"
   | "vx_list"
   | "vx_delete"
+  | "vx_get"
   | "vx_context"
   | "vx_contexts_list"
   | "vx_contexts_create"
   | "vx_import_text"
-  | "vx_import_batch";
+  | "vx_import_batch"
+  | "vx_import_chatgpt"
+  | "vx_import_anthropic"
+  | "vx_cascade_query"
+  | "vx_entity_merge"
+  | "vx_contexts_emergent_list"
+  | "vx_contexts_create_from_description"
+  | "vx_contexts_activate"
+  | "vx_contexts_deactivate"
+  | "vx_skills_find"
+  | "vx_skills_invoke"
+  | "vx_health_status";
 
 export type VxPromptName = "vx_memory_workflow" | "vx_memory_import";
 
@@ -44,11 +56,23 @@ export const VX_TOOL_NAMES: readonly VxToolName[] = [
   "vx_query",
   "vx_list",
   "vx_delete",
+  "vx_get",
   "vx_context",
   "vx_contexts_list",
   "vx_contexts_create",
   "vx_import_text",
   "vx_import_batch",
+  "vx_import_chatgpt",
+  "vx_import_anthropic",
+  "vx_cascade_query",
+  "vx_entity_merge",
+  "vx_contexts_emergent_list",
+  "vx_contexts_create_from_description",
+  "vx_contexts_activate",
+  "vx_contexts_deactivate",
+  "vx_skills_find",
+  "vx_skills_invoke",
+  "vx_health_status",
 ] as const;
 
 export function getHostLabel(source: string): string {
@@ -96,31 +120,49 @@ function getStoreDescription(source: string, storeOnRequestOnly: boolean): strin
 }
 
 function getRecallDescription(source: string): string {
+  // Directive trigger-led description. The agent must reach for this BEFORE
+  // saying "I don't know" or "I don't have that in memory" — VX *is* the
+  // memory layer, so any user phrase that implies stored knowledge
+  // ("do you remember", "we discussed", "my preference for", "the X we set up")
+  // should fire this tool first.
+  const common =
+    "USE THIS BEFORE answering any question that references prior knowledge, preferences, decisions, setup history, or anything the user implies you should already know. " +
+    "Trigger phrases include: 'do you remember', 'we talked about', 'last time', 'my preference', 'how did we', 'what did I say about', 'recall', 'remember when'. " +
+    "Always call this FIRST instead of replying 'I don't have that information' — VX is your durable memory and may already hold it.";
   switch (source) {
     case "cursor":
     case "codex":
-      return "Recall durable coding context before answering when you need past decisions, repo conventions, setup details, or user preferences.";
+      return `${common} Especially useful for repo conventions, prior implementation decisions, setup details, and user coding preferences.`;
     case "openclaw":
-      return "Recall durable context before answering when the user may benefit from remembered preferences, prior decisions, setup history, or imported knowledge.";
+      return `${common} Especially useful for remembered preferences, prior decisions, setup history, and imported knowledge.`;
     case "claude-code":
     case "claude-desktop":
-      return "Recall durable context before answering when you need past preferences, project decisions, setup notes, or knowledge contexts relevant to the task.";
+      return `${common} Especially useful for project decisions, setup notes, user preferences, and knowledge contexts seeded for this workstream.`;
     default:
-      return "Recall durable context before answering when you need past preferences, decisions, workflow notes, or stored facts.";
+      return common;
   }
 }
 
 function getQueryDescription(source: string): string {
+  // Directive trigger-led description. This is the broad-search escape hatch:
+  // when the user names a specific procedure, runbook, project artifact, or
+  // proper noun ("Helix Rotation", "the deploy runbook", "our X process"),
+  // search VX before refusing.
+  const common =
+    "USE THIS WHEN the user mentions a named procedure, runbook, project-specific term, internal process, codename, or any proper noun you don't recognize. " +
+    "Trigger phrases include: 'do you have X in memory', 'our procedure for', 'the X runbook', 'we call it', 'the stored', 'internal process', 'team procedure', 'project-specific', 'walk me through our X'. " +
+    "ALWAYS call this BEFORE replying 'I don't know that procedure' or 'I don't have access to' — the memory you need is almost certainly stored here. " +
+    "Pass the proper noun or name verbatim as the query; VX matches by signal, not embedding, so exact terms are high-precision.";
   switch (source) {
     case "codex":
-      return "Search stored VX memories for focused coding context such as test setup, release steps, conventions, or past implementation decisions.";
+      return `${common} Especially for test setup, release steps, conventions, prior implementation decisions, and named coding workflows.`;
     case "openclaw":
-      return "Search stored VX memories for focused user-facing context such as preferences, setup state, recurring workflows, or prior decisions.";
+      return `${common} Especially for preferences, setup state, recurring workflows, and named user procedures.`;
     case "claude-code":
     case "claude-desktop":
-      return "Search stored VX memories for focused context such as preferences, decisions, setup notes, or knowledge saved inside a specific knowledge context.";
+      return `${common} Especially for project decisions, setup notes, named procedures, and knowledge stored inside a specific knowledge context.`;
     default:
-      return "Search stored VX memories with a focused phrase when you need a specific fact, decision, or preference.";
+      return common;
   }
 }
 
@@ -184,6 +226,12 @@ export function getVxToolDefinitions(config: VxCatalogConfig): VxToolDefinition[
           counterpartySession: {
             type: "string",
             description: "Optional session or thread identifier for the interaction.",
+          },
+          metadata: {
+            type: "object",
+            description:
+              "Optional free-form metadata merged into the stored memory. Use a namespaced key (for example `vx_skill`) to avoid collisions with VX-managed fields.",
+            additionalProperties: true,
           },
         },
         required: ["content"],
@@ -337,6 +385,21 @@ export function getVxToolDefinitions(config: VxCatalogConfig): VxToolDefinition[
       },
     },
     {
+      name: "vx_get",
+      description:
+        "Fetch a single VX memory by ID, including its metadata. Use this to resolve references such as skill step IDs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            description: "The VX memory ID to fetch.",
+          },
+        },
+        required: ["id"],
+      },
+    },
+    {
       name: "vx_context",
       description: getContextDescription(config.source),
       inputSchema: {
@@ -478,6 +541,252 @@ export function getVxToolDefinitions(config: VxCatalogConfig): VxToolDefinition[
           },
         },
         required: ["memories"],
+      },
+    },
+    {
+      name: "vx_import_chatgpt",
+      description:
+        "Ingest a ChatGPT conversations export into VX. Accepts a path to a conversations.json (or compatible) file on disk that the API can read; supports a dry-run preview and a row limit.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Absolute or server-accessible path to the ChatGPT export file (for example `conversations.json`).",
+          },
+          dryRun: {
+            type: "boolean",
+            description: "If true, prepare and summarize the import without persisting memories.",
+            default: false,
+          },
+          limit: {
+            type: "number",
+            description: "Optional maximum number of conversations or rows to ingest.",
+          },
+        },
+        required: ["path"],
+      },
+    },
+    {
+      name: "vx_import_anthropic",
+      description:
+        "Ingest an Anthropic/Claude conversations export into VX. Accepts a path to the export file that the API can read; supports dry-run preview and a row limit.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Absolute or server-accessible path to the Anthropic/Claude export file.",
+          },
+          dryRun: {
+            type: "boolean",
+            description: "If true, prepare and summarize the import without persisting memories.",
+            default: false,
+          },
+          limit: {
+            type: "number",
+            description: "Optional maximum number of conversations or rows to ingest.",
+          },
+        },
+        required: ["path"],
+      },
+    },
+    {
+      name: "vx_cascade_query",
+      description:
+        "Run a signal-first retrieval cascade over VX memory. Use this for recall that should combine BM25, vector, entity-graph walks, and temporal channels; returns top memories plus retrieval meta including `queryId` for later explain.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Focused retrieval query.",
+          },
+          contexts: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional knowledge context filters.",
+          },
+          counterparty: {
+            type: "object",
+            description: "Optional counterparty identity (person, bot, agent, or subagent) to bias retrieval.",
+            properties: {
+              id: { type: "string" },
+              kind: { type: "string" },
+              client: { type: "string" },
+              session: { type: "string" },
+            },
+            required: ["id"],
+          },
+          channels: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional list of retrieval channels to enable (for example `bm25`, `vector`, `ner-walk`, `temporal`). Omit to use the server default.",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of results (default: 10).",
+            default: 10,
+          },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "vx_entity_merge",
+      description:
+        "Merge a set of entity aliases into a canonical entity. Requires explicit confirmation because this rewrites canonical identity links across signals.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          canonical: {
+            type: "string",
+            description: "The canonical entity name or identifier to merge aliases into.",
+          },
+          aliases: {
+            type: "array",
+            items: { type: "string" },
+            description: "List of alias names or IDs to collapse under the canonical entity.",
+          },
+          confidence: {
+            type: "number",
+            minimum: 0,
+            maximum: 1,
+            description: "Confidence score (0-1) for this merge.",
+          },
+          confirm: {
+            type: "boolean",
+            description: "Must be set to true to apply the merge. Omit or set false to preview only.",
+            default: false,
+          },
+        },
+        required: ["canonical", "aliases", "confidence", "confirm"],
+      },
+    },
+    {
+      name: "vx_contexts_emergent_list",
+      description:
+        "List emergent (auto-discovered) knowledge contexts proposed by VX community detection. Use this to inspect proposed context clusters before activating them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          minSize: {
+            type: "number",
+            description: "Minimum cluster size to include.",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of emergent contexts to return (default: 20).",
+            default: 20,
+          },
+        },
+      },
+    },
+    {
+      name: "vx_contexts_create_from_description",
+      description:
+        "Create a knowledge context from a natural-language description. VX interprets the description into a structured context definition.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Target context path, for example `work/project-alpha`.",
+          },
+          description: {
+            type: "string",
+            description: "Natural-language description of what belongs in this context.",
+          },
+        },
+        required: ["name", "description"],
+      },
+    },
+    {
+      name: "vx_contexts_activate",
+      description:
+        "Activate a knowledge context so it participates in retrieval, scoped queries, and cascade results.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Context name to activate.",
+          },
+        },
+        required: ["name"],
+      },
+    },
+    {
+      name: "vx_contexts_deactivate",
+      description:
+        "Deactivate a knowledge context so it is excluded from retrieval and cascade results.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Context name to deactivate.",
+          },
+        },
+        required: ["name"],
+      },
+    },
+    {
+      name: "vx_skills_find",
+      description:
+        "USE THIS WHEN the user asks about a stored procedure, runbook, named workflow, internal process, team-specific recipe, or any 'how do we X' / 'walk me through our X' question. " +
+        "Trigger phrases include: 'procedure', 'runbook', 'workflow', 'process', 'how do we', 'walk me through', 'our way of', 'the X procedure', 'do you remember how', 'stored procedure', 'team procedure', 'reusable', 'standard operating procedure', 'SOP'. " +
+        "If the user mentions a proper-noun name for a process (e.g. 'Helix Rotation', 'Blue-Green deploy', 'Cold-Start playbook'), CALL THIS FIRST with that name as the triggerQuery — never refuse with 'I don't know that procedure' before searching. " +
+        "Skills are crystallized routes through VX memory; many procedures the user will reference are stored as skills, not raw memories.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          triggerQuery: {
+            type: "string",
+            description:
+              "Natural-language phrase describing the user's intent or goal. Pass the procedure name verbatim if the user provided one (e.g. 'Helix Rotation'); skills match on trigger phrases, so exact names are high-precision.",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of skills to return (default: 5).",
+            default: 5,
+          },
+        },
+        required: ["triggerQuery"],
+      },
+    },
+    {
+      name: "vx_skills_invoke",
+      description:
+        "Invoke a named VX skill — typically called right after `vx_skills_find` returns a candidate skill. " +
+        "USE THIS WHEN you need the actual content / steps of a stored procedure, runbook, or workflow that `vx_skills_find` surfaced. " +
+        "Set `execute: false` (default) to safely retrieve the skill's plan and steps without side-effects; this is what you want for answering 'walk me through' or 'what are the steps' questions. " +
+        "Set `execute: true` only when the user explicitly asks the skill to run. " +
+        "If you've found a relevant skill via `vx_skills_find`, CALL THIS NEXT instead of guessing at the steps.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "The VX skill name or identifier to invoke (use the value returned by `vx_skills_find`).",
+          },
+          execute: {
+            type: "boolean",
+            description: "If true, actually execute the skill. Default false (preview/read steps only — this is the safe default for answering procedure questions).",
+            default: false,
+          },
+        },
+        required: ["name"],
+      },
+    },
+    {
+      name: "vx_health_status",
+      description:
+        "Fetch the detailed VX health report (DB, Redis, retrieval, worker, model, etc.). Use this when diagnosing problems or confirming readiness of the memory layer.",
+      inputSchema: {
+        type: "object",
+        properties: {},
       },
     },
   ];
