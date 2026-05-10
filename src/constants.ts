@@ -1,8 +1,11 @@
-export const VX_MCP_SERVER_NAME = "vx-memory";
-export const VX_MCP_SERVER_VERSION = "0.5.6";
-export const VX_DEFAULT_NAME = "VX";
-export const VX_DEFAULT_API_BASE_URL = "https://api.onememory.co/v1";
-export const VX_DEFAULT_MAX_TOKENS = 4000;
-export const VX_PACKAGE_NAME = "vx-mcp-server";
-export const VX_PACKAGE_SPEC =
-  process.env.VX_MCP_PACKAGE_SPEC || `${VX_PACKAGE_NAME}@latest`;
+/**
+ * Canonical defaults for the v1 installer.
+ *
+ * v1 of vx-mcp is HTTP-transport only. The package no longer ships a local
+ * MCP server; clients connect directly to the hosted VX endpoint and
+ * complete an OAuth flow on first use. There is no static credential, no
+ * env-var auth, and no `/v1` base URL suffix — clients point at `/mcp`.
+ */
+export const VX_MCP_URL = "https://api.onememory.co/mcp";
+export const VX_MCP_SERVER_NAME = "vx";
+export const VX_PACKAGE_NAME = "@vx-nyc/vx-mcp";

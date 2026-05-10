@@ -1,59 +1,56 @@
-# vx-mcp-server
+# vx-mcp
 
-Plugin-first VX memory for Claude, Codex, Cursor, OpenClaw, and other MCP clients.
+Installer for the hosted [VX](https://onememory.co) memory MCP server.
 
-VX gives your assistant durable memory for:
+VX gives your AI assistant durable memory for:
 
 - user preferences
 - project decisions
-- setup choices
 - recurring workflows
 - imported notes or prior chat history
 
-Users get more continuity across sessions and spend less time repeating themselves.
+This package is **just an installer**. The MCP server itself is hosted at
+`https://api.onememory.co/mcp` and handles OAuth automatically — there is no
+API key to manage, and nothing runs locally beyond the wiring step.
 
 ## Requirements
 
 - Node.js 18 or newer
-- A VX API base URL, usually `https://api.vx.dev/v1`
-- One VX credential: `VX_API_KEY` or `VX_BEARER_TOKEN`
+- A VX account (you'll be prompted to sign up / sign in via your browser on
+  first use; no setup needed up front)
 
-## Quick Start
+## Quick start
 
 ### Claude Code
 
-Default path:
+```bash
+npx @vx-nyc/vx-mcp install claude
+```
+
+This runs `claude mcp add --transport http vx https://api.onememory.co/mcp`
+and installs the bundled `/vx-memory` slash command. On the first VX tool
+call, Claude Code will open your browser to sign in.
+
+If the `claude` CLI is not on your PATH, the installer prints the equivalent
+command for you to run yourself.
+
+### Cursor
 
 ```bash
-npx vx-mcp-server install claude
+npx @vx-nyc/vx-mcp install cursor
 ```
 
-This installs:
+This writes the VX entry to `~/.cursor/mcp.json` as an HTTP MCP server. Cursor
+will open your browser to sign in on first use.
 
-- the packaged VX MCP server in Claude Code
-- a bundled `/vx-memory` slash command with the recommended recall/store/import workflow
-
-Secondary path: Claude Code plugin marketplace
-
-```text
-/plugin marketplace add vx-nyc/vx-mcp
-/plugin install vx-mcp
-```
-
-Fallback: Claude Desktop MCP config
+Manual equivalent — add this block to `~/.cursor/mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "vx": {
-      "command": "npx",
-      "args": ["-y", "vx-mcp-server@latest", "mcp"],
-      "env": {
-        "VX_API_BASE_URL": "https://api.vx.dev/v1",
-        "VX_API_KEY": "your-api-key",
-        "VX_NAME": "VX",
-        "VX_SOURCE": "claude-desktop"
-      }
+      "type": "http",
+      "url": "https://api.onememory.co/mcp"
     }
   }
 }
@@ -61,88 +58,40 @@ Fallback: Claude Desktop MCP config
 
 ### Codex
 
-Default path:
-
 ```bash
-npx vx-mcp-server install codex
+npx @vx-nyc/vx-mcp install codex
 ```
 
-This installs:
+This appends a managed block to `~/.codex/config.toml` and installs the
+bundled Codex skill. On first use, Codex opens your browser to sign in.
 
-- the packaged VX MCP server in `~/.codex/config.toml`
-- a bundled Codex skill at `~/.codex/skills/vx-memory/SKILL.md`
-
-Direct CLI fallback:
-
-```bash
-codex mcp add vx -- npx -y vx-mcp-server@latest mcp
-```
-
-Manual `~/.codex/config.toml` fallback:
+Manual equivalent — add this to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.vx]
-command = "npx"
-args = ["-y", "vx-mcp-server@latest", "mcp"]
-
-[mcp_servers.vx.env]
-VX_API_BASE_URL = "https://api.vx.dev/v1"
-VX_API_KEY = "your-api-key"
-VX_NAME = "VX"
-VX_SOURCE = "codex"
-```
-
-### Cursor
-
-One-click install:
-
-[![Add to Cursor](https://img.shields.io/badge/Add%20to-Cursor-111111?style=for-the-badge)](cursor://anysphere.cursor-deeplink/mcp/install?name=vx&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsInZ4LW1jcC1zZXJ2ZXJAbGF0ZXN0IiwibWNwIl0sImVudiI6eyJWWF9BUElfQkFTRV9VUkwiOiJodHRwczovL2FwaS52eC5kZXYvdjEiLCJWWF9BUElfS0VZIjoieW91ci1hcGkta2V5IiwiVlhfTkFNRSI6IlZYIiwiVlhfU09VUkNFIjoiY3Vyc29yIn19)
-
-After adding it, set your VX credential in Cursor before first use.
-
-Manual `.cursor/mcp.json` fallback:
-
-```json
-{
-  "mcpServers": {
-    "vx": {
-      "command": "npx",
-      "args": ["-y", "vx-mcp-server@latest", "mcp"],
-      "env": {
-        "VX_API_BASE_URL": "https://api.vx.dev/v1",
-        "VX_API_KEY": "your-api-key",
-        "VX_NAME": "VX",
-        "VX_SOURCE": "cursor"
-      }
-    }
-  }
-}
+url = "https://api.onememory.co/mcp"
+transport = "streamable_http"
 ```
 
 ### OpenClaw
 
-Install the native plugin:
-
 ```bash
-openclaw plugins install vx-mcp-server
-openclaw gateway restart
+npx @vx-nyc/vx-mcp install openclaw
 ```
 
-Add plugin config once:
+If the `openclaw` CLI is on your PATH this will run
+`openclaw plugins install @vx-nyc/vx-mcp` and print the plugin config snippet.
+Otherwise it prints the snippet for manual install:
 
-```json5
+```json
 {
-  plugins: {
-    entries: {
+  "plugins": {
+    "entries": {
       "vx-memory": {
-        enabled: true,
-        config: {
-          apiBaseUrl: "https://api.vx.dev/v1",
-          apiKey: "your-api-key",
-          source: "openclaw",
-          name: "VX",
-          storeOnRequestOnly: false,
-          maxTokens: 4000
+        "enabled": true,
+        "config": {
+          "apiBaseUrl": "https://api.onememory.co/mcp",
+          "source": "openclaw"
         }
       }
     }
@@ -150,60 +99,54 @@ Add plugin config once:
 }
 ```
 
-Verify setup:
+OpenClaw handles the OAuth flow when it first connects to the MCP endpoint.
 
-1. Ask OpenClaw to run `vx_status`.
-2. Store one small preference with `vx_store`.
-3. Recall it with `vx_recall` or `vx_context`.
+## Authentication
 
-Compared with regular OpenClaw, VX adds durable recall of preferences, decisions, imported history, and recurring workflows across sessions.
+VX uses standard OAuth 2.1 (RFC 6749) with dynamic client registration
+(RFC 7591) and OAuth-protected resource metadata (RFC 9728).
 
-### NemoClaw
+You don't configure any of this. The supported MCP clients handle the entire
+flow on their own: they discover `auth.onememory.co`, register themselves
+dynamically, open your browser for sign-in / consent, and store the resulting
+token in their own keychain.
 
-If your NemoClaw deployment supports OpenClaw plugins, use the same install and config flow as OpenClaw.
+If you have an existing per-device VX API key from a previous version, it is
+**not used** by v1 — clients connect over OAuth-authenticated HTTP instead.
 
-If it exposes MCP configuration instead, use the standard MCP config shown below with `VX_SOURCE` set to `openclaw` or `nemoclaw`.
+## Uninstall
 
-## Standard MCP Config
-
-Use this in any MCP client that accepts a local command:
-
-```json
-{
-  "mcpServers": {
-    "vx": {
-      "command": "npx",
-      "args": ["-y", "vx-mcp-server@latest", "mcp"],
-      "env": {
-        "VX_API_BASE_URL": "https://api.vx.dev/v1",
-        "VX_API_KEY": "your-api-key",
-        "VX_NAME": "VX",
-        "VX_SOURCE": "mcp"
-      }
-    }
-  }
-}
+```bash
+npx @vx-nyc/vx-mcp uninstall claude
+npx @vx-nyc/vx-mcp uninstall cursor
+npx @vx-nyc/vx-mcp uninstall codex
+npx @vx-nyc/vx-mcp uninstall openclaw
 ```
 
-## Bundled Guidance
+Each command removes the entry added by the corresponding `install`.
 
-This package ships host-specific guidance so the memory workflow feels native instead of generic:
+## Bundled guidance
 
-- Claude Code: bundled `/vx-memory` slash command
-- Codex: bundled `vx-memory` skill
-- OpenClaw: bundled `vx-memory` skill plus native `vx_status`
-- MCP prompts: `vx_memory_workflow` and `vx_memory_import`
+This package ships host-specific guidance so the memory workflow feels native:
 
-Recommended workflow in every host:
+- Claude Code: `/vx-memory` slash command (installed to `~/.claude/commands/`)
+- Codex: `vx-memory` skill (installed to `~/.codex/skills/`)
+- OpenClaw: `vx-memory` skill packaged with the plugin
+
+Recommended workflow:
 
 1. Recall first with `vx_recall`.
 2. Use `vx_context` when one topic needs broader continuity.
-3. Use `vx_contexts_list` to inspect existing knowledge contexts and `vx_contexts_create` when a new namespace is needed.
-4. Store new durable facts with `vx_store` one item at a time inside the right knowledge context.
+3. Use `vx_contexts_list` to inspect existing contexts and `vx_contexts_create`
+   when a new namespace is needed.
+4. Store new durable facts with `vx_store` one item at a time inside the right
+   context.
 5. Use `vx_import_text` or `vx_import_batch` to migrate prior notes or exports.
 6. Never store secrets, tokens, private keys, or credentials.
 
 ## Tools
+
+The hosted MCP server exposes the same VX tool catalog you had in v0.x:
 
 | Tool | Purpose |
 | --- | --- |
@@ -213,119 +156,49 @@ Recommended workflow in every host:
 | `vx_list` | Browse stored memory with optional filters |
 | `vx_delete` | Remove a memory by ID |
 | `vx_context` | Build a broader context packet for one topic |
-| `vx_contexts_list` | List available knowledge contexts |
-| `vx_contexts_create` | Create a new knowledge context |
+| `vx_contexts_list` | List available contexts |
+| `vx_contexts_create` | Create a new context |
 | `vx_import_text` | Import exports, transcripts, or long notes |
 | `vx_import_batch` | Import a curated batch of atomic memories |
 
-OpenClaw also exposes:
-
-- `vx_status` to verify plugin readiness
-
-## Environment Variables
-
-| Variable | Description |
-| --- | --- |
-| `VX_API_BASE_URL` | Canonical VX API base URL including `/v1` |
-| `VX_API_URL` | Backward-compatible fallback without `/v1`; prefer `VX_API_BASE_URL` for new setups |
-| `VX_API_KEY` | VX API key |
-| `VX_BEARER_TOKEN` | VX bearer token |
-| `VX_NAME` | Friendly display name, default `VX` |
-| `VX_SOURCE` | Host/source label stored with memory metadata. Recommended values: `claude-code`, `claude-desktop`, `codex`, `openclaw`, `mcp` |
-| `VX_MCP_STORE_ON_REQUEST_ONLY` | Set to `1` or `true` to avoid automatic durable storage outside explicit memory moments |
-| `VX_CUSTODIAN_ID` | Optional custodian identifier for multi-tenant setups |
-
-## Verify In One Prompt
-
-Use this after installation:
-
-```text
-Remember that I prefer TypeScript over JavaScript, then tell me my coding preference.
-```
-
-The assistant should store the preference and then recall it from VX.
+…plus the cascade query, entity merge, emergent contexts, skills, and health
+tools. See your client's tool list after installation.
 
 ## CLI
 
 ```bash
-vx-mcp [mcp|install <claude|codex>|uninstall <claude|codex>]
+vx-mcp install <claude|cursor|codex|openclaw>
+vx-mcp uninstall <claude|cursor|codex|openclaw>
+vx-mcp clients
+vx-mcp --version
+vx-mcp --help
 ```
 
-## Programmatic Usage
+## Migrating from v0.x
 
-This package also exports a lightweight client wrapper for direct VX API access.
+If you used vx-mcp v0.x with `VX_API_KEY` env var:
 
-```ts
-import { VXClient } from "vx-mcp-server/client";
+1. Run `npx @vx-nyc/vx-mcp@1 install <client>` for each client you use.
+2. The new install path overwrites the stdio entry with an HTTP entry pointed
+   at `https://api.onememory.co/mcp`.
+3. Remove any `VX_API_KEY` / `VX_BEARER_TOKEN` references from your shell
+   profile — they are no longer used by this package.
+4. On first tool call, your client will open your browser. Sign in with the
+   same account that owned your v0.x API key and your existing memories will
+   be available.
 
-const client = new VXClient({
-  apiBaseUrl: "https://api.vx.dev/v1",
-  apiKey: process.env.VX_API_KEY!,
-  source: "codex",
-});
-
-const stored = await client.store({
-  content: "User prefers TypeScript over JavaScript.",
-  context: "preferences/language",
-  memoryType: "SEMANTIC",
-  importance: 0.8,
-});
-
-const query = await client.query({
-  query: "What language does the user prefer?",
-  context: "preferences/language",
-  limit: 3,
-});
-
-await client.delete(stored.id);
-```
-
-Available subpath exports:
-
-- `vx-mcp-server/client`
-- `vx-mcp-server/types`
+The v0.x stdio binary and all `VX_*` env-var configuration paths were removed
+in v1.0.0.
 
 ## Development
 
 ```bash
+npm install
 npm run build
 npm test
 ```
 
-Use `VX_API_BASE_URL`, `VX_API_KEY`, or `VX_BEARER_TOKEN` when running against a real VX environment.
+This package is published from `main` to GitHub Packages on tag push. See
+`CHANGELOG.md` for release notes.
 
 See `CONTRIBUTING.md` for contributor workflow and public-repo safety rules.
-
-## Manual QA
-
-Use this checklist before publishing a release.
-
-### Claude Code
-
-1. Run `npx vx-mcp-server install claude` with `VX_API_BASE_URL` and one VX credential set.
-2. Confirm Claude Code shows the `vx` MCP server and `/vx-memory` slash command.
-3. Run `/vx-memory` and verify the guidance mentions recall, context packets, knowledge contexts, atomic storage, and imports.
-4. Create a knowledge context, store one preference inside it, then recall it in a fresh chat.
-5. Run `npx vx-mcp-server uninstall claude` and confirm the MCP server and slash command are removed.
-
-### Codex
-
-1. Run `npx vx-mcp-server install codex` with `VX_API_BASE_URL` and one VX credential set.
-2. Confirm `~/.codex/config.toml` contains a single managed VX block with `npx -y vx-mcp-server@latest mcp`.
-3. Confirm `~/.codex/skills/vx-memory/SKILL.md` exists and matches the shipped workflow guidance.
-4. Start Codex, verify the VX MCP server loads, create a knowledge context, store one preference inside it, then recall it in a fresh session.
-5. Run `npx vx-mcp-server uninstall codex` and confirm the managed block and installed skill are removed cleanly.
-
-### OpenClaw
-
-1. Run `openclaw plugins install vx-mcp-server` and restart the gateway.
-2. Add `plugins.entries.vx-memory.config` with `apiBaseUrl` and one VX credential.
-3. Verify `vx_status` reports the plugin as ready.
-4. Verify `vx_contexts_create` and `vx_contexts_list` work, then store memory inside that knowledge context.
-5. Verify `vx_store`, `vx_recall`, `vx_context`, `vx_import_text`, and `vx_import_batch` are callable.
-6. Start a fresh session and confirm a stored preference is still recalled.
-
-### Package
-
-1. Run `npm run build`.
-2. Run `npm test`.

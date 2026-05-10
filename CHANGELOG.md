@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-05-10
+
+### BREAKING
+
+- **Removed the stdio MCP server.** v1 is HTTP-transport only. The package
+  no longer ships an MCP runtime; it is purely an installer that wires up
+  Claude Code / Cursor / Codex / OpenClaw to the hosted endpoint at
+  `https://api.onememory.co/mcp`.
+- **Removed static API key authentication.** `VX_API_KEY` and
+  `VX_BEARER_TOKEN` env vars are no longer read by this package. Clients
+  authenticate via OAuth 2.1 (RFC 6749 + RFC 7591 dynamic client registration
+  + RFC 9728 protected resource metadata) on first use; the OAuth flow is
+  handled by your MCP client, not by this package.
+- **Removed the `mcp` runtime command.** The `vx-mcp` binary now exposes
+  only `install`, `uninstall`, `clients`, `--version`, and `--help`.
+- **Removed subpath exports `./client` and `./types`.** They were thin
+  wrappers around the now-removed local SDK. Pin v0.5.x if you need them,
+  or call the public REST API directly.
+- **Removed the `@modelcontextprotocol/sdk` runtime dependency.** The
+  installer is pure Node stdlib + your client's CLI.
+
+### Migration
+
+After upgrading, re-run `npx @vx-nyc/vx-mcp install <claude|cursor|codex|openclaw>`
+for every client. The installer overwrites your existing stdio entry with an
+HTTP entry. Remove any `VX_API_KEY` / `VX_BEARER_TOKEN` references from your
+shell profile. On the first VX tool call your client will open your browser
+to sign in — use the account that owned your v0.x key and your memories will
+be available.
+
+### Added
+
+- HTTP installer paths for Claude Code (`claude mcp add --transport http`),
+  Cursor (`~/.cursor/mcp.json`), Codex (`~/.codex/config.toml`), and OpenClaw
+  plugin config.
+- `uninstall <client>` for every supported target.
+- Idempotency: re-running `install` does not duplicate entries.
+
 ## [0.5.8] - 2026-03-23
 
 ### Changed

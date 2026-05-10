@@ -1,8 +1,8 @@
 {
   "id": "vx-memory",
   "name": "VX Memory",
-  "description": "Native VX memory plugin for OpenClaw with durable recall, context packets, and import workflows.",
-  "version": "0.5.6",
+  "description": "VX memory for OpenClaw. Connects to the hosted MCP endpoint over HTTP with OAuth — no static API key needed.",
+  "version": "1.0.0",
   "skills": [
     "skills/openclaw/vx-memory"
   ],
@@ -12,16 +12,8 @@
     "properties": {
       "apiBaseUrl": {
         "type": "string",
-        "default": "https://api.vx.dev/v1",
-        "description": "VX API base URL including /v1."
-      },
-      "apiKey": {
-        "type": "string",
-        "description": "VX API key."
-      },
-      "bearerToken": {
-        "type": "string",
-        "description": "VX bearer token."
+        "default": "https://api.onememory.co/mcp",
+        "description": "VX MCP HTTP endpoint. The OpenClaw runtime handles the OAuth flow on first use."
       },
       "source": {
         "type": "string",
@@ -32,34 +24,13 @@
         "type": "string",
         "default": "VX",
         "description": "Friendly display name used in VX responses."
-      },
-      "storeOnRequestOnly": {
-        "type": "boolean",
-        "default": false,
-        "description": "Only store memory when the user explicitly asks or when the workflow clearly calls for it."
-      },
-      "maxTokens": {
-        "type": "number",
-        "minimum": 1,
-        "default": 4000,
-        "description": "Default token budget for VX context packets."
       }
     }
   },
   "uiHints": {
     "apiBaseUrl": {
-      "label": "VX API Base URL",
-      "placeholder": "https://api.vx.dev/v1"
-    },
-    "apiKey": {
-      "label": "VX API Key",
-      "placeholder": "vx_...",
-      "sensitive": true
-    },
-    "bearerToken": {
-      "label": "VX Bearer Token",
-      "placeholder": "vx_...",
-      "sensitive": true
+      "label": "VX MCP URL",
+      "placeholder": "https://api.onememory.co/mcp"
     },
     "source": {
       "label": "Source Tag",
@@ -68,13 +39,6 @@
     "name": {
       "label": "Display Name",
       "placeholder": "VX"
-    },
-    "storeOnRequestOnly": {
-      "label": "Store Only On Request"
-    },
-    "maxTokens": {
-      "label": "Default Context Tokens",
-      "placeholder": "4000"
     }
   }
 }
