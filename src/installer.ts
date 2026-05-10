@@ -11,14 +11,10 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  VX_DEFAULT_API_BASE_URL,
-  VX_DEFAULT_MAX_TOKENS,
-  VX_DEFAULT_NAME,
-  VX_PACKAGE_SPEC,
+  VX_MCP_SERVER_NAME,
+  VX_MCP_URL,
+  VX_PACKAGE_NAME,
 } from "./constants.js";
-import { handleKeysCli } from "./keys.js";
-import { handleMigrateCli } from "./migrate.js";
-import { normalizeApiBaseUrl, normalizeSourceTag } from "./runtime.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,54 +22,18 @@ const __dirname = dirname(__filename);
 export const CODEX_BLOCK_START = "# BEGIN VX MCP";
 export const CODEX_BLOCK_END = "# END VX MCP";
 
-export type PackagedLauncher = {
-  command: string;
-  args: string[];
-};
+export type SupportedClientTarget =
+  | "claude"
+  | "cursor"
+  | "codex"
+  | "openclaw";
 
-export type CursorMcpConfig = {
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-};
-
-export const SUPPORTED_CLIENT_TARGETS = [
-  "amp",
+export const SUPPORTED_CLIENT_TARGETS: readonly SupportedClientTarget[] = [
   "claude",
-  "claude-desktop",
-  "cline",
-  "codex",
-  "continue",
-  "copilot-cli",
-  "copilot-vscode",
   "cursor",
-  "factory",
-  "gemini-cli",
-  "gemini-code-assist",
-  "jetbrains",
-  "junie",
-  "kiro",
-  "mcp",
-  "nemoclaw",
-  "opencode",
+  "codex",
   "openclaw",
-  "qoder",
-  "qoder-cli",
-  "vscode",
-  "warp",
-  "windsurf",
 ] as const;
-
-export type SupportedClientTarget = (typeof SUPPORTED_CLIENT_TARGETS)[number];
-
-export type ClientInstallArtifact = {
-  target: SupportedClientTarget;
-  title: string;
-  kind: "json" | "json5" | "toml" | "shell" | "text";
-  destination?: string;
-  content: string;
-  notes: string[];
-};
 
 export type InstallerDeps = {
   copyFileSync: typeof copyFileSync;
@@ -103,10 +63,6 @@ function repoRootFromModule(): string {
   return resolve(__dirname, "..");
 }
 
-function escapeTomlString(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
-}
-
 function ensureDir(path: string, deps: InstallerDeps): void {
   deps.mkdirSync(path, { recursive: true });
 }
@@ -115,391 +71,26 @@ function readText(path: string, deps: InstallerDeps): string {
   return deps.readFileSync(path, "utf8");
 }
 
-function resolveCredentialEnv(
-  env: NodeJS.ProcessEnv
-): Record<string, string> {
-  if (env.VX_BEARER_TOKEN) {
-    return { VX_BEARER_TOKEN: env.VX_BEARER_TOKEN };
-  }
-
-  if (env.VX_API_KEY) {
-    return { VX_API_KEY: env.VX_API_KEY };
-  }
-
-  return {};
-}
-
-export function getPackagedLauncher(): PackagedLauncher {
-  return {
-    command: "npx",
-    args: ["-y", VX_PACKAGE_SPEC, "mcp"],
-  };
-}
-
-export function getInstallEnv(
-  source: SupportedClientTarget,
-  env: NodeJS.ProcessEnv = process.env
-): Record<string, string> {
-  const sourceTag = source === "claude" ? "claude-code" : source;
-  return {
-    VX_API_BASE_URL: normalizeApiBaseUrl(
-      env.VX_API_BASE_URL || env.VX_API_URL || VX_DEFAULT_API_BASE_URL
-    ),
-    VX_NAME: env.VX_NAME || VX_DEFAULT_NAME,
-    VX_SOURCE: normalizeSourceTag(sourceTag),
-    ...resolveCredentialEnv(env),
-  };
-}
-
-export function stripCodexManagedBlock(content: string): string {
-  const start = content.indexOf(CODEX_BLOCK_START);
-  const end = content.indexOf(CODEX_BLOCK_END);
-  if (start === -1 || end === -1 || end < start) {
-    return content.trim();
-  }
-
-  const before = content.slice(0, start).trimEnd();
-  const after = content.slice(end + CODEX_BLOCK_END.length).trimStart();
-  return `${before}${before && after ? "\n\n" : ""}${after}`.trim();
-}
-
-export function upsertCodexManagedBlock(content: string, block: string): string {
-  const stripped = stripCodexManagedBlock(content);
-  return `${stripped}${stripped ? "\n\n" : ""}${block.trim()}\n`;
-}
-
-function formatTomlArray(values: string[]): string {
-  return `[${values.map((value) => `"${escapeTomlString(value)}"`).join(", ")}]`;
-}
-
-export function buildCodexTomlBlock(
-  launcher: PackagedLauncher = getPackagedLauncher(),
-  env = getInstallEnv("codex")
-): string {
-  const envLines = Object.entries(env).map(
-    ([key, value]) => `${key} = "${escapeTomlString(value)}"`
-  );
-
-  return [
-    CODEX_BLOCK_START,
-    "[mcp_servers.vx]",
-    `command = "${escapeTomlString(launcher.command)}"`,
-    `args = ${formatTomlArray(launcher.args)}`,
-    "",
-    "[mcp_servers.vx.env]",
-    ...envLines,
-    CODEX_BLOCK_END,
-  ].join("\n");
-}
-
-export function buildClaudeMcpConfigObject(
-  launcher: PackagedLauncher = getPackagedLauncher(),
-  env = getInstallEnv("claude")
-): {
-  type: "stdio";
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-} {
-  return {
-    type: "stdio",
-    command: launcher.command,
-    args: launcher.args,
-    env,
-  };
-}
-
-export function buildClaudeMcpConfig(
-  launcher: PackagedLauncher = getPackagedLauncher(),
-  env = getInstallEnv("claude")
-): string {
-  return JSON.stringify(buildClaudeMcpConfigObject(launcher, env));
-}
-
-export function buildCursorMcpConfigObject(
-  launcher: PackagedLauncher = getPackagedLauncher(),
-  env = getInstallEnv("cursor")
-): CursorMcpConfig {
-  return {
-    command: launcher.command,
-    args: launcher.args,
-    env,
-  };
-}
-
-export function buildCursorDeeplink(
-  name = "vx",
-  launcher: PackagedLauncher = getPackagedLauncher(),
-  env = getInstallEnv("cursor")
-): string {
-  const encodedConfig = Buffer.from(
-    JSON.stringify(buildCursorMcpConfigObject(launcher, env)),
-    "utf8"
-  ).toString("base64");
-
-  return `cursor://anysphere.cursor-deeplink/mcp/install?name=${encodeURIComponent(name)}&config=${encodeURIComponent(encodedConfig)}`;
-}
-
-export function buildStandardMcpConfigObject(
-  launcher: PackagedLauncher = getPackagedLauncher(),
-  env = getInstallEnv("mcp")
-): CursorMcpConfig {
-  return {
-    command: launcher.command,
-    args: launcher.args,
-    env,
-  };
-}
-
-export function buildTopLevelMcpConfigObject(
-  env = getInstallEnv("mcp"),
-  launcher: PackagedLauncher = getPackagedLauncher(),
-  serverName = "vx"
-): { mcpServers: Record<string, CursorMcpConfig> } {
-  return {
-    mcpServers: {
-      [serverName]: buildStandardMcpConfigObject(launcher, env),
-    },
-  };
-}
-
-export function buildOpenCodeConfigObject(
-  env = getInstallEnv("opencode"),
-  launcher: PackagedLauncher = getPackagedLauncher()
-): {
-  $schema: string;
-  mcp: Record<
-    string,
-    { type: "local"; command: string[]; env: Record<string, string> }
-  >;
-} {
-  return {
-    $schema: "https://opencode.ai/config.json",
-    mcp: {
-      vx: {
-        type: "local",
-        command: [launcher.command, ...launcher.args],
-        env,
-      },
-    },
-  };
-}
-
-export function buildOpenClawPluginConfigObject(
-  env = getInstallEnv("openclaw")
-): {
-  plugins: {
-    entries: {
-      "vx-memory": {
-        enabled: true;
-        config: Record<string, string | boolean | number>;
-      };
-    };
-  };
-} {
-  const config: Record<string, string | boolean | number> = {
-    apiBaseUrl: env.VX_API_BASE_URL,
-    source: env.VX_SOURCE,
-    name: env.VX_NAME,
-    storeOnRequestOnly: false,
-    maxTokens: VX_DEFAULT_MAX_TOKENS,
-  };
-
-  if (env.VX_API_KEY) {
-    config.apiKey = env.VX_API_KEY;
-  }
-  if (env.VX_BEARER_TOKEN) {
-    config.bearerToken = env.VX_BEARER_TOKEN;
-  }
-
-  return {
-    plugins: {
-      entries: {
-        "vx-memory": {
-          enabled: true,
-          config,
-        },
-      },
-    },
-  };
-}
-
-function toPrettyJson(value: unknown): string {
-  return JSON.stringify(value, null, 2);
-}
-
-function toVsCodeAddMcpCommand(
-  env: Record<string, string>,
-  launcher: PackagedLauncher = getPackagedLauncher()
-): string {
-  const payload = JSON.stringify({
-    name: "io.github.vx-nyc/vx-mcp",
-    command: launcher.command,
-    args: launcher.args,
-    env,
-  });
-  return `code --add-mcp '${payload}'`;
-}
-
-export function buildClientInstallArtifact(
-  target: SupportedClientTarget,
-  env = getInstallEnv(target),
-  launcher: PackagedLauncher = getPackagedLauncher()
-): ClientInstallArtifact {
-  switch (target) {
-    case "claude":
-      return {
-        target,
-        title: "Claude Code MCP payload",
-        kind: "json",
-        content: toPrettyJson(buildClaudeMcpConfigObject(launcher, env)),
-        notes: [
-          "Managed install is available with: npx vx-mcp-server install claude",
-          "Manual registration uses: claude mcp add-json --scope user vx '<payload>'",
-        ],
-      };
-    case "codex":
-      return {
-        target,
-        title: "Codex config block",
-        kind: "toml",
-        destination: "~/.codex/config.toml",
-        content: buildCodexTomlBlock(launcher, env),
-        notes: [
-          "Managed install is available with: npx vx-mcp-server install codex",
-        ],
-      };
-    case "cursor":
-      return {
-        target,
-        title: "Cursor MCP config",
-        kind: "json",
-        destination: ".cursor/mcp.json",
-        content: toPrettyJson(buildTopLevelMcpConfigObject(env, launcher)),
-        notes: [
-          `One-click deeplink: ${buildCursorDeeplink("vx", launcher, env)}`,
-        ],
-      };
-    case "openclaw":
-    case "nemoclaw":
-      return {
-        target,
-        title: `${target} plugin config`,
-        kind: "json",
-        content: toPrettyJson(buildOpenClawPluginConfigObject(env)),
-        notes: [
-          `Install plugin with: openclaw plugins install ${VX_PACKAGE_SPEC}`,
-          "Restart the gateway after enabling the plugin.",
-        ],
-      };
-    case "opencode":
-      return {
-        target,
-        title: "OpenCode config",
-        kind: "json",
-        destination: "~/.config/opencode/opencode.json",
-        content: toPrettyJson(buildOpenCodeConfigObject(env, launcher)),
-        notes: [],
-      };
-    case "amp":
-      return {
-        target,
-        title: "Amp CLI install command",
-        kind: "shell",
-        content: `amp mcp add vx -- ${launcher.command} ${launcher.args.join(" ")}`,
-        notes: [],
-      };
-    case "factory":
-      return {
-        target,
-        title: "Factory CLI install command",
-        kind: "shell",
-        content: `droid mcp add vx "${launcher.command} ${launcher.args.join(" ")}"`,
-        notes: [],
-      };
-    case "gemini-cli":
-      return {
-        target,
-        title: "Gemini CLI install commands",
-        kind: "shell",
-        content: [
-          `${"gemini mcp add vx"} ${launcher.command} ${launcher.args.join(" ")}`,
-          `${"gemini mcp add -s user vx"} ${launcher.command} ${launcher.args.join(" ")}`,
-        ].join("\n"),
-        notes: [],
-      };
-    case "qoder-cli":
-      return {
-        target,
-        title: "Qoder CLI install commands",
-        kind: "shell",
-        content: [
-          `qodercli mcp add vx -- ${launcher.command} ${launcher.args.join(" ")}`,
-          `qodercli mcp add -s user vx -- ${launcher.command} ${launcher.args.join(" ")}`,
-        ].join("\n"),
-        notes: [],
-      };
-    case "copilot-cli":
-      return {
-        target,
-        title: "Copilot CLI setup steps",
-        kind: "text",
-        content: [
-          "Start `copilot`.",
-          "Run `/mcp add`.",
-          "Set server name to `vx`.",
-          `Set command to \`${launcher.command} ${launcher.args.join(" ")}\`.`,
-          `Set environment variables from the snippet for source \`${env.VX_SOURCE}\`.`,
-        ].join("\n"),
-        notes: [],
-      };
-    case "copilot-vscode":
-    case "vscode":
-      return {
-        target,
-        title: "VS Code add-mcp command",
-        kind: "shell",
-        content: toVsCodeAddMcpCommand(env, launcher),
-        notes: [
-          toPrettyJson(buildTopLevelMcpConfigObject(env, launcher)),
-        ],
-      };
-    case "claude-desktop":
-    case "cline":
-    case "continue":
-    case "gemini-code-assist":
-    case "jetbrains":
-    case "junie":
-    case "kiro":
-    case "mcp":
-    case "qoder":
-    case "warp":
-    case "windsurf":
-      return {
-        target,
-        title: `${target} MCP config`,
-        kind: "json",
-        content: toPrettyJson(buildTopLevelMcpConfigObject(env, launcher)),
-        notes: [],
-      };
+function readJsonFile<T>(path: string, deps: InstallerDeps): T | null {
+  if (!deps.existsSync(path)) return null;
+  const raw = readText(path, deps).trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
   }
 }
 
-function printArtifact(artifact: ClientInstallArtifact): void {
-  console.log(`# ${artifact.title}`);
-  if (artifact.destination) {
-    console.log(`# destination: ${artifact.destination}`);
-  }
-  console.log(artifact.content);
-  for (const note of artifact.notes) {
-    console.log(`\n# ${note}`);
-  }
+function writeJsonFile(path: string, value: unknown, deps: InstallerDeps): void {
+  ensureDir(dirname(path), deps);
+  deps.writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
 function copySkill(
   sourceParts: string[],
   destination: string,
-  deps: InstallerDeps
+  deps: InstallerDeps,
 ): void {
   const source = join(repoRootFromModule(), ...sourceParts);
   ensureDir(dirname(destination), deps);
@@ -513,50 +104,157 @@ function findCli(binary: string, deps: InstallerDeps): string | null {
   return result.status === 0 && result.stdout.trim() ? result.stdout.trim() : null;
 }
 
+// ---------------------------------------------------------------------------
+// Codex managed-block helpers (still used by the TOML installer for idempotency)
+// ---------------------------------------------------------------------------
+
+export function stripCodexManagedBlock(content: string): string {
+  const start = content.indexOf(CODEX_BLOCK_START);
+  const end = content.indexOf(CODEX_BLOCK_END);
+  if (start === -1 || end === -1 || end < start) {
+    return content.trim();
+  }
+  const before = content.slice(0, start).trimEnd();
+  const after = content.slice(end + CODEX_BLOCK_END.length).trimStart();
+  return `${before}${before && after ? "\n\n" : ""}${after}`.trim();
+}
+
+export function upsertCodexManagedBlock(content: string, block: string): string {
+  const stripped = stripCodexManagedBlock(content);
+  return `${stripped}${stripped ? "\n\n" : ""}${block.trim()}\n`;
+}
+
+function escapeTomlString(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+/**
+ * TOML block for `~/.codex/config.toml` pointing Codex at the hosted MCP
+ * endpoint. Codex resolves `transport = "streamable_http"` + `url` to the
+ * RFC-9728 OAuth flow and prompts the user in their browser on first use.
+ */
+export function buildCodexTomlBlock(
+  url: string = VX_MCP_URL,
+  serverName: string = VX_MCP_SERVER_NAME,
+): string {
+  return [
+    CODEX_BLOCK_START,
+    `[mcp_servers.${serverName}]`,
+    `url = "${escapeTomlString(url)}"`,
+    `transport = "streamable_http"`,
+    CODEX_BLOCK_END,
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Cursor config helpers
+// ---------------------------------------------------------------------------
+
+export type CursorHttpServerEntry = {
+  type: "http";
+  url: string;
+};
+
+export type CursorMcpFile = {
+  mcpServers?: Record<string, CursorHttpServerEntry | Record<string, unknown>>;
+};
+
+/**
+ * Idempotently upsert the VX entry into a `~/.cursor/mcp.json` document.
+ * Preserves any other servers the user has configured.
+ */
+export function upsertCursorVxEntry(
+  current: CursorMcpFile | null,
+  url: string = VX_MCP_URL,
+  serverName: string = VX_MCP_SERVER_NAME,
+): CursorMcpFile {
+  const existing: CursorMcpFile = current && typeof current === "object" ? { ...current } : {};
+  const servers = { ...(existing.mcpServers ?? {}) };
+  servers[serverName] = { type: "http", url };
+  return { ...existing, mcpServers: servers };
+}
+
+export function removeCursorVxEntry(
+  current: CursorMcpFile | null,
+  serverName: string = VX_MCP_SERVER_NAME,
+): CursorMcpFile {
+  if (!current) return { mcpServers: {} };
+  const servers = { ...(current.mcpServers ?? {}) };
+  delete servers[serverName];
+  return { ...current, mcpServers: servers };
+}
+
+// ---------------------------------------------------------------------------
+// Claude Code installer
+// ---------------------------------------------------------------------------
+
+/**
+ * Register the hosted VX MCP server with Claude Code.
+ *
+ * Primary path: shell out to `claude mcp add --transport http vx <url>`. The
+ * Claude Code CLI owns the OAuth handshake — it stores the resulting tokens
+ * in its own keychain. We never see a credential.
+ *
+ * Fallback (no `claude` CLI on PATH): the user gets a printable command and a
+ * note pointing at the docs. The slash command is still copied.
+ */
 export function installClaude(deps: InstallerDeps = defaultDeps): string[] {
   const notes: string[] = [];
+
   const claudeCommandsDir = join(deps.homedir(), ".claude", "commands");
   const commandPath = join(claudeCommandsDir, "vx-memory.md");
   ensureDir(claudeCommandsDir, deps);
   copySkill(["skills", "claude", "vx-memory", "vx-memory.md"], commandPath, deps);
   notes.push(`Installed Claude Code slash command at ${commandPath}`);
 
-  if (!deps.env.VX_API_KEY && !deps.env.VX_BEARER_TOKEN) {
-    notes.push(
-      "No VX credential was found in the current environment. Add `VX_API_KEY` or `VX_BEARER_TOKEN` in Claude Code before using VX."
-    );
-  }
-
   const claudeCli = findCli("claude", deps);
   if (!claudeCli) {
     notes.push(
-      "Claude Code CLI (`claude`) was not found, so MCP registration was skipped. Run `claude mcp add-json --scope user vx '<json>'` after installing Claude Code."
+      "Claude Code CLI (`claude`) was not found on PATH. Install Claude Code, then run:",
+    );
+    notes.push(
+      `  claude mcp add --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}`,
+    );
+    notes.push(
+      "Claude Code will open your browser to sign in via OAuth on first use.",
     );
     return notes;
   }
+
+  // Make the install idempotent: if vx is already registered, remove it first
+  // so the re-run produces a clean configuration.
+  deps.spawnSync(claudeCli, ["mcp", "remove", VX_MCP_SERVER_NAME], {
+    encoding: "utf8",
+  });
 
   const addResult = deps.spawnSync(
     claudeCli,
     [
       "mcp",
-      "add-json",
-      "--scope",
-      "user",
-      "vx",
-      buildClaudeMcpConfig(getPackagedLauncher(), getInstallEnv("claude", deps.env)),
+      "add",
+      "--transport",
+      "http",
+      VX_MCP_SERVER_NAME,
+      VX_MCP_URL,
     ],
-    { encoding: "utf8" }
+    { encoding: "utf8" },
   );
 
   if (addResult.status === 0) {
     notes.push(
-      "Registered the packaged VX MCP server with Claude Code using `claude mcp add-json --scope user`."
+      `Registered VX MCP server with Claude Code: \`claude mcp add --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}\``,
+    );
+    notes.push(
+      "On first tool call, Claude Code will open your browser to sign in.",
     );
   } else {
     notes.push(
       `Claude Code CLI was found but MCP registration failed: ${
-        addResult.stderr.trim() || addResult.stdout.trim()
-      }`
+        addResult.stderr?.trim() || addResult.stdout?.trim() || "unknown error"
+      }`,
+    );
+    notes.push(
+      `Retry manually: claude mcp add --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}`,
     );
   }
 
@@ -573,201 +271,331 @@ export function uninstallClaude(deps: InstallerDeps = defaultDeps): string[] {
 
   const claudeCli = findCli("claude", deps);
   if (claudeCli) {
-    const removeResult = deps.spawnSync(claudeCli, ["mcp", "remove", "vx"], {
-      encoding: "utf8",
-    });
+    const removeResult = deps.spawnSync(
+      claudeCli,
+      ["mcp", "remove", VX_MCP_SERVER_NAME],
+      { encoding: "utf8" },
+    );
     if (removeResult.status === 0) {
       notes.push("Removed the VX MCP server from Claude Code.");
     } else {
       notes.push(
         `Claude Code CLI was found but MCP removal failed: ${
-          removeResult.stderr.trim() || removeResult.stdout.trim()
-        }`
+          removeResult.stderr?.trim() || removeResult.stdout?.trim() || "unknown error"
+        }`,
       );
     }
+  } else {
+    notes.push(
+      "Claude Code CLI was not found on PATH. Remove the VX entry manually with `claude mcp remove vx` once Claude Code is installed.",
+    );
   }
 
   return notes;
 }
 
+// ---------------------------------------------------------------------------
+// Cursor installer
+// ---------------------------------------------------------------------------
+
+function cursorMcpJsonPath(deps: InstallerDeps): string {
+  return join(deps.homedir(), ".cursor", "mcp.json");
+}
+
+export function installCursor(deps: InstallerDeps = defaultDeps): string[] {
+  const notes: string[] = [];
+  const path = cursorMcpJsonPath(deps);
+  const current = readJsonFile<CursorMcpFile>(path, deps);
+  const next = upsertCursorVxEntry(current);
+  writeJsonFile(path, next, deps);
+  notes.push(`Wrote Cursor MCP config at ${path}`);
+  notes.push(
+    "Restart Cursor; it will open your browser to sign in via OAuth on first VX tool use.",
+  );
+  return notes;
+}
+
+export function uninstallCursor(deps: InstallerDeps = defaultDeps): string[] {
+  const notes: string[] = [];
+  const path = cursorMcpJsonPath(deps);
+  const current = readJsonFile<CursorMcpFile>(path, deps);
+  if (!current) {
+    notes.push(`No Cursor MCP config found at ${path}; nothing to remove.`);
+    return notes;
+  }
+  const next = removeCursorVxEntry(current);
+  writeJsonFile(path, next, deps);
+  notes.push(`Removed the VX entry from ${path}`);
+  return notes;
+}
+
+// ---------------------------------------------------------------------------
+// Codex installer
+// ---------------------------------------------------------------------------
+
+function codexHome(deps: InstallerDeps): string {
+  return deps.env.CODEX_HOME || join(deps.homedir(), ".codex");
+}
+
 export function installCodex(deps: InstallerDeps = defaultDeps): string[] {
   const notes: string[] = [];
-  const codexHome = deps.env.CODEX_HOME || join(deps.homedir(), ".codex");
-  const skillsDir = join(codexHome, "skills", "vx-memory");
+  const home = codexHome(deps);
+
+  const skillsDir = join(home, "skills", "vx-memory");
   const skillPath = join(skillsDir, "SKILL.md");
   ensureDir(skillsDir, deps);
   copySkill(["skills", "codex", "vx-memory", "SKILL.md"], skillPath, deps);
   notes.push(`Installed Codex skill at ${skillPath}`);
 
-  if (!deps.env.VX_API_KEY && !deps.env.VX_BEARER_TOKEN) {
-    notes.push(
-      "No VX credential was found in the current environment. Add `VX_API_KEY` or `VX_BEARER_TOKEN` in Codex before using VX."
-    );
-  }
-
-  const configPath = join(codexHome, "config.toml");
+  const configPath = join(home, "config.toml");
   const current = deps.existsSync(configPath) ? readText(configPath, deps) : "";
-  const updated = upsertCodexManagedBlock(
-    current,
-    buildCodexTomlBlock(getPackagedLauncher(), getInstallEnv("codex", deps.env))
-  );
+  const updated = upsertCodexManagedBlock(current, buildCodexTomlBlock());
   ensureDir(dirname(configPath), deps);
   deps.writeFileSync(configPath, updated, "utf8");
   notes.push(`Updated Codex MCP config at ${configPath}`);
-
+  notes.push(
+    "Restart Codex; it will open your browser to sign in via OAuth on first VX tool use.",
+  );
   return notes;
 }
 
 export function uninstallCodex(deps: InstallerDeps = defaultDeps): string[] {
   const notes: string[] = [];
-  const codexHome = deps.env.CODEX_HOME || join(deps.homedir(), ".codex");
-  const skillDir = join(codexHome, "skills", "vx-memory");
+  const home = codexHome(deps);
+
+  const skillDir = join(home, "skills", "vx-memory");
   if (deps.existsSync(skillDir)) {
     deps.rmSync(skillDir, { recursive: true, force: true });
     notes.push(`Removed Codex skill at ${skillDir}`);
   }
 
-  const configPath = join(codexHome, "config.toml");
+  const configPath = join(home, "config.toml");
   if (deps.existsSync(configPath)) {
     const stripped = stripCodexManagedBlock(readText(configPath, deps));
     deps.writeFileSync(configPath, stripped ? `${stripped}\n` : "", "utf8");
     notes.push(`Removed VX MCP configuration from ${configPath}`);
   }
-
   return notes;
+}
+
+// ---------------------------------------------------------------------------
+// OpenClaw installer
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the OpenClaw plugin config snippet pointing at the hosted MCP URL.
+ *
+ * OAuth is handled by the OpenClaw runtime — there's no `apiKey` or
+ * `bearerToken` to configure. If your OpenClaw version doesn't yet handle
+ * OAuth-protected MCP servers, upgrade it; static credentials are no longer
+ * supported in v1.
+ */
+export function buildOpenClawPluginConfig(
+  url: string = VX_MCP_URL,
+): {
+  plugins: {
+    entries: {
+      "vx-memory": {
+        enabled: true;
+        config: { apiBaseUrl: string; source: "openclaw" };
+      };
+    };
+  };
+} {
+  return {
+    plugins: {
+      entries: {
+        "vx-memory": {
+          enabled: true,
+          config: {
+            apiBaseUrl: url,
+            source: "openclaw",
+          },
+        },
+      },
+    },
+  };
 }
 
 export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
   const notes: string[] = [];
-  const artifact = buildClientInstallArtifact(
-    "openclaw",
-    getInstallEnv("openclaw", deps.env)
-  );
-
-  if (!deps.env.VX_API_KEY && !deps.env.VX_BEARER_TOKEN) {
-    notes.push(
-      "No VX credential was found in the current environment. Add `VX_API_KEY` or `VX_BEARER_TOKEN` before using the OpenClaw plugin."
-    );
-  }
+  const snippet = JSON.stringify(buildOpenClawPluginConfig(), null, 2);
 
   const openclawCli = findCli("openclaw", deps);
   if (!openclawCli) {
     notes.push(
-      `OpenClaw CLI (\`openclaw\`) was not found, so automatic plugin installation was skipped. Run \`openclaw plugins install ${VX_PACKAGE_SPEC}\` manually.`
+      `OpenClaw CLI (\`openclaw\`) was not found on PATH. Install OpenClaw, then run:`,
     );
-    notes.push(artifact.content);
+    notes.push(`  openclaw plugins install ${VX_PACKAGE_NAME}`);
+    notes.push("Add this to your OpenClaw plugin config:");
+    notes.push(snippet);
     return notes;
   }
 
   const installResult = deps.spawnSync(
     openclawCli,
-    ["plugins", "install", VX_PACKAGE_SPEC],
-    { encoding: "utf8" }
+    ["plugins", "install", VX_PACKAGE_NAME],
+    { encoding: "utf8" },
   );
 
   if (installResult.status === 0) {
     notes.push(
-      `Installed the VX plugin for OpenClaw with \`openclaw plugins install ${VX_PACKAGE_SPEC}\`.`
+      `Installed the VX plugin for OpenClaw: \`openclaw plugins install ${VX_PACKAGE_NAME}\``,
     );
   } else {
     notes.push(
       `OpenClaw CLI was found but plugin installation failed: ${
-        installResult.stderr.trim() || installResult.stdout.trim()
-      }`
+        installResult.stderr?.trim() || installResult.stdout?.trim() || "unknown error"
+      }`,
     );
     notes.push(
-      `You can retry manually with: openclaw plugins install ${VX_PACKAGE_SPEC}`
+      `Retry manually: openclaw plugins install ${VX_PACKAGE_NAME}`,
     );
   }
 
-  notes.push(artifact.content);
+  notes.push("Add this to your OpenClaw plugin config:");
+  notes.push(snippet);
+  notes.push(
+    "OpenClaw will open your browser to sign in via OAuth on first VX tool use.",
+  );
   return notes;
+}
+
+export function uninstallOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
+  const notes: string[] = [];
+  const openclawCli = findCli("openclaw", deps);
+  if (!openclawCli) {
+    notes.push(
+      `OpenClaw CLI (\`openclaw\`) was not found on PATH. Remove the plugin manually with \`openclaw plugins remove ${VX_PACKAGE_NAME}\`.`,
+    );
+    return notes;
+  }
+  const result = deps.spawnSync(
+    openclawCli,
+    ["plugins", "remove", VX_PACKAGE_NAME],
+    { encoding: "utf8" },
+  );
+  if (result.status === 0) {
+    notes.push(`Removed the VX plugin from OpenClaw.`);
+  } else {
+    notes.push(
+      `OpenClaw CLI was found but plugin removal failed: ${
+        result.stderr?.trim() || result.stdout?.trim() || "unknown error"
+      }`,
+    );
+  }
+  return notes;
+}
+
+// ---------------------------------------------------------------------------
+// CLI dispatch
+// ---------------------------------------------------------------------------
+
+const USAGE = [
+  `Usage: vx-mcp <command> [target]`,
+  ``,
+  `Commands:`,
+  `  install <claude|cursor|codex|openclaw>    Wire up a client to ${VX_MCP_URL}`,
+  `  uninstall <claude|cursor|codex|openclaw>  Remove the VX MCP entry`,
+  `  clients                                   List supported clients`,
+  `  --version, -v                             Print package version`,
+  `  --help, -h                                Show this message`,
+  ``,
+  `OAuth happens automatically. Your client will open your browser to sign`,
+  `in on the first VX tool call. No API key is needed.`,
+].join("\n");
+
+function readPackageVersion(deps: InstallerDeps): string {
+  try {
+    const pkgPath = join(repoRootFromModule(), "package.json");
+    const pkg = JSON.parse(readText(pkgPath, deps)) as { version?: string };
+    return pkg.version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+export function printHelp(): void {
+  console.log(USAGE);
+}
+
+export function isSupportedClient(value: string): value is SupportedClientTarget {
+  return (SUPPORTED_CLIENT_TARGETS as readonly string[]).includes(value);
 }
 
 export async function handleCli(
   argv: string[],
-  deps: InstallerDeps = defaultDeps
+  deps: InstallerDeps = defaultDeps,
 ): Promise<boolean> {
   const [command, target] = argv;
-  if (!command) {
-    return false;
+
+  if (!command || command === "--help" || command === "-h" || command === "help") {
+    printHelp();
+    return true;
   }
 
-  if (
-    ((command === "install" &&
-      (target === "claude" || target === "codex" || target === "openclaw")) ||
-      (command === "uninstall" &&
-        (target === "claude" || target === "codex")))
-  ) {
+  if (command === "--version" || command === "-v") {
+    console.log(readPackageVersion(deps));
+    return true;
+  }
+
+  if (command === "clients") {
+    console.log("Supported clients:");
+    for (const item of SUPPORTED_CLIENT_TARGETS) {
+      console.log(`  - ${item}`);
+    }
+    return true;
+  }
+
+  if (command === "install" || command === "uninstall") {
+    if (!target || !isSupportedClient(target)) {
+      console.error(
+        `Unknown target ${target ? `\`${target}\`` : "(missing)"}. Supported: ${SUPPORTED_CLIENT_TARGETS.join(", ")}.`,
+      );
+      printHelp();
+      return true;
+    }
+
     const notes =
       command === "install"
-        ? target === "claude"
-          ? installClaude(deps)
-          : target === "codex"
-            ? installCodex(deps)
-            : installOpenClaw(deps)
-        : target === "claude"
-          ? uninstallClaude(deps)
-          : uninstallCodex(deps);
+        ? runInstall(target, deps)
+        : runUninstall(target, deps);
 
-    console.log(
-      `${command === "install" ? "Completed" : "Removed"} VX ${target} ${
-        command === "install" ? "setup" : "integration"
-      }.`
-    );
+    const verb = command === "install" ? "Installed" : "Removed";
+    console.log(`${verb} VX MCP for ${target}.`);
     for (const note of notes) {
       console.log(`- ${note}`);
     }
     return true;
   }
 
-  if (command === "clients") {
-    console.log("Managed install targets:");
-    console.log("- claude");
-    console.log("- codex");
-    console.log("- openclaw");
-    console.log("");
-    console.log("Config/recipe targets:");
-    for (const item of SUPPORTED_CLIENT_TARGETS) {
-      console.log(`- ${item}`);
-    }
-    return true;
-  }
-
-  if (
-    command === "config" &&
-    target &&
-    SUPPORTED_CLIENT_TARGETS.includes(target as SupportedClientTarget)
-  ) {
-    printArtifact(
-      buildClientInstallArtifact(target as SupportedClientTarget, getInstallEnv(target as SupportedClientTarget, deps.env))
-    );
-    return true;
-  }
-
-  if (command === "migrate") {
-    return handleMigrateCli(argv.slice(1), {
-      ...deps,
-    });
-  }
-
-  if (command === "keys") {
-    return handleKeysCli(argv.slice(1), {
-      env: deps.env,
-      homedir: deps.homedir,
-      existsSync: deps.existsSync,
-      mkdirSync: deps.mkdirSync,
-      readFileSync: deps.readFileSync,
-      writeFileSync: deps.writeFileSync,
-    });
-  }
-
-  if (command === "mcp") {
-    return false;
-  }
-
-  console.log(
-    "Usage: vx-mcp [mcp|clients|config <target>|install <claude|codex|openclaw>|uninstall <claude|codex>|migrate [all|codex|claude|openclaw] [--dry-run] [--context <name>] [--path <file>] [--openclaw-path <file>]|keys generate [--out-dir <path>] [--force] [--skip-upload]]"
-  );
+  console.error(`Unknown command: ${command}`);
+  printHelp();
   return true;
+}
+
+function runInstall(target: SupportedClientTarget, deps: InstallerDeps): string[] {
+  switch (target) {
+    case "claude":
+      return installClaude(deps);
+    case "cursor":
+      return installCursor(deps);
+    case "codex":
+      return installCodex(deps);
+    case "openclaw":
+      return installOpenClaw(deps);
+  }
+}
+
+function runUninstall(target: SupportedClientTarget, deps: InstallerDeps): string[] {
+  switch (target) {
+    case "claude":
+      return uninstallClaude(deps);
+    case "cursor":
+      return uninstallCursor(deps);
+    case "codex":
+      return uninstallCodex(deps);
+    case "openclaw":
+      return uninstallOpenClaw(deps);
+  }
 }

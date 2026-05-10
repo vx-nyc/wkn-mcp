@@ -1,16 +1,11 @@
 {
   "name": "vx-mcp",
-  "version": "latest",
-  "description": "VX Universal memory for Claude Code with bundled workflow guidance.",
+  "version": "1.0.0",
+  "description": "VX Universal memory for Claude Code. Connects to the hosted MCP endpoint over HTTP with OAuth — no API key needed.",
   "mcpServers": {
     "vx": {
-      "command": "npx",
-      "args": ["-y", "vx-mcp-server@latest", "mcp"],
-      "env": {
-        "VX_API_BASE_URL": "https://api.vx.dev/v1",
-        "VX_NAME": "VX",
-        "VX_SOURCE": "claude-code"
-      }
+      "type": "http",
+      "url": "https://api.onememory.co/mcp"
     }
   }
 }

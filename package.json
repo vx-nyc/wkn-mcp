@@ -1,8 +1,8 @@
 {
   "name": "@vx-nyc/vx-mcp",
-  "version": "0.5.12",
+  "version": "1.0.0",
   "private": false,
-  "description": "Plugin-first VX memory for Claude, Codex, OpenClaw, and other MCP clients.",
+  "description": "Installer for the hosted VX memory MCP server. Wires up Claude Code, Cursor, Codex, and OpenClaw to https://api.onememory.co/mcp over HTTP with OAuth.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -13,62 +13,35 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./client": {
-      "types": "./dist/client.d.ts",
-      "default": "./dist/client.js"
-    },
-    "./types": {
-      "types": "./dist/types.d.ts",
-      "default": "./dist/types.js"
     }
   },
   "scripts": {
-    "build": "npm run build --workspace=sdk && tsc",
+    "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "tsx test/mcp-e2e.ts",
-    "test:continuity": "tsx test/continuity-test.ts",
-    "test:counterparty": "tsx test/counterparty-continuity-test.ts",
     "check:secrets": "bash scripts/check-no-secrets.sh",
-    "generate-certs": "bash scripts/generate-certs.sh",
-    "start:https": "VX_MCP_TRANSPORT=http VX_MCP_HTTPS=1 VX_MCP_HTTPS_KEY_PATH=./certs/mcp-key.pem VX_MCP_HTTPS_CERT_PATH=./certs/mcp-cert.pem VX_MCP_HTTP_HOST=0.0.0.0 VX_MCP_HTTP_PORT=3100 VX_MCP_OAUTH_CLIENT_ID=vx-mcp-demo VX_MCP_OAUTH_CLIENT_SECRET=demo-secret-change-me VX_API_BASE_URL=http://localhost:3000/v1 VX_BEARER_TOKEN=vx_test_local_00000000000000000000000000000000 node dist/index.js",
-    "check:all": "npm run build && npm run check:secrets"
+    "check:all": "npm run build && npm test && npm run check:secrets"
   },
   "keywords": [
     "mcp",
     "model-context-protocol",
-    "modelcontextprotocol",
     "ai",
     "ai-memory",
     "memory",
     "persistent-memory",
     "context",
+    "claude",
+    "claude-code",
+    "cursor",
     "codex",
     "openclaw",
-    "context-window",
-    "claude",
-    "claude-desktop",
-    "cursor",
-    "windsurf",
-    "vscode",
-    "continue",
+    "oauth",
     "llm",
-    "rag",
-    "retrieval",
     "knowledge-base",
-    "knowledge-graph",
-    "embeddings",
-    "semantic-search",
-    "vector-database",
     "long-term-memory",
-    "ai-tools",
-    "developer-tools",
-    "anthropic",
-    "openai",
-    "gpt"
+    "vx"
   ],
   "author": {
     "name": "One Memory Inc"
@@ -90,12 +63,6 @@
     "type": "github",
     "url": "https://github.com/sponsors/vx-nyc"
   },
-  "workspaces": [
-    "sdk"
-  ],
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
-  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
@@ -113,10 +80,5 @@
     "CHANGELOG.md",
     "CONTRIBUTING.md",
     "openclaw.plugin.json"
-  ],
-  "openclaw": {
-    "extensions": [
-      "./dist/openclaw.js"
-    ]
-  }
+  ]
 }
