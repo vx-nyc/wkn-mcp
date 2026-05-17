@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.13] - 2026-05-16
+
+### Added
+- `./sdk` subpath export so consumers can `import { createVxClient, VxApiClient, waitForVxApi } from '@vx-nyc/vx-mcp/sdk'`. The SDK was already shipped in `dist/sdk/` but was not declared in the package `exports` allow-list, so it could not be imported.
+
 ## [0.5.8] - 2026-03-23
 
 ### Changed
