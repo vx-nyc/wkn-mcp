@@ -5,6 +5,7 @@ import {
   CODEX_BLOCK_START,
   CODEX_BLOCK_END,
   handleCli,
+  installAll,
   installClaude,
   installCursor,
   installCodex,
@@ -152,7 +153,7 @@ describe("installClaude", () => {
     const slashCommandPath = join(deps.homedir(), ".claude", "commands", "vx-memory.md");
     expect(existsSync(slashCommandPath)).toBe(true);
     expect(notes.join("\n")).toContain(
-      "claude mcp add --transport http vx https://api.onememory.co/mcp",
+      "claude mcp add --scope user --transport http vx https://api.onememory.co/mcp",
     );
   });
 
@@ -168,11 +169,21 @@ describe("installClaude", () => {
     const notes = installClaude(deps);
     const calls = vi.mocked(deps.spawnSync).mock.calls;
 
+    expect(calls[1]?.[1]).toEqual([
+      "mcp",
+      "remove",
+      "--scope",
+      "user",
+      "vx",
+    ]);
+
     // The 3rd spawnSync call is the actual `claude mcp add`.
     const addArgs = calls[2]?.[1] ?? [];
     expect(addArgs).toEqual([
       "mcp",
       "add",
+      "--scope",
+      "user",
       "--transport",
       "http",
       "vx",
@@ -290,6 +301,28 @@ describe("installOpenClaw", () => {
   });
 });
 
+describe("installAll", () => {
+  it("wires every supported local client in one command", () => {
+    const deps = createDeps();
+    mockSpawn(
+      deps,
+      { status: 1 }, // Claude CLI lookup
+      { status: 1 }, // OpenClaw CLI lookup
+    );
+
+    const notes = installAll(deps).join("\n");
+
+    expect(existsSync(join(deps.homedir(), ".claude", "commands", "vx-memory.md"))).toBe(true);
+    expect(existsSync(join(deps.homedir(), ".cursor", "mcp.json"))).toBe(true);
+    expect(existsSync(join(deps.homedir(), ".codex", "config.toml"))).toBe(true);
+    expect(notes).toContain("Claude Code");
+    expect(notes).toContain("Cursor");
+    expect(notes).toContain("Codex");
+    expect(notes).toContain("OpenClaw");
+    expect(notes).toContain("openclaw plugins install @vx-nyc/vx-mcp");
+  });
+});
+
 describe("handleCli", () => {
   it("prints usage when called with no args", async () => {
     const deps = createDeps();
@@ -326,6 +359,19 @@ describe("handleCli", () => {
     const path = join(deps.homedir(), ".cursor", "mcp.json");
     expect(existsSync(path)).toBe(true);
   });
+
+  it("dispatches install all", async () => {
+    const deps = createDeps();
+    mockSpawn(
+      deps,
+      { status: 1 }, // Claude CLI lookup
+      { status: 1 }, // OpenClaw CLI lookup
+    );
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await handleCli(["install", "all"], deps);
+    expect(existsSync(join(deps.homedir(), ".cursor", "mcp.json"))).toBe(true);
+    expect(existsSync(join(deps.homedir(), ".codex", "config.toml"))).toBe(true);
+  });
 });
 
 describe("uninstallClaude", () => {
@@ -334,5 +380,24 @@ describe("uninstallClaude", () => {
     mockSpawn(deps, { status: 1 });
     const notes = uninstallClaude(deps);
     expect(notes.join("\n")).toContain("Claude Code CLI was not found");
+  });
+
+  it("removes the user-scoped Claude Code MCP entry when the CLI is available", () => {
+    const deps = createDeps();
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "/usr/local/bin/claude\n" },
+      { status: 0 },
+    );
+
+    uninstallClaude(deps);
+
+    expect(vi.mocked(deps.spawnSync).mock.calls[1]?.[1]).toEqual([
+      "mcp",
+      "remove",
+      "--scope",
+      "user",
+      "vx",
+    ]);
   });
 });

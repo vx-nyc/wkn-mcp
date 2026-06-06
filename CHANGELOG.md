@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `install all` to wire every supported local MCP client in one command.
+- ChatGPT setup guidance for connecting the hosted VX MCP endpoint through
+  ChatGPT Apps / developer mode.
+
+### Changed
+
+- Claude Code installs now use user scope so the VX MCP server is available
+  across projects and visible in `claude mcp list`.
+
 ## [1.0.0] - 2026-05-10
 
 ### BREAKING
