@@ -21,13 +21,26 @@ API key to manage, and nothing runs locally beyond the wiring step.
 
 ## Quick start
 
+### All supported local clients
+
+```bash
+npx @vx-nyc/vx-mcp install all
+```
+
+This runs the installer for Claude Code, Cursor, Codex, and OpenClaw in one
+pass. Clients that support local config files are updated directly. Clients
+that require their own CLI are configured when the CLI is on your PATH; if a
+CLI is missing, the installer prints the exact manual command or config
+snippet to apply.
+
 ### Claude Code
 
 ```bash
 npx @vx-nyc/vx-mcp install claude
 ```
 
-This runs `claude mcp add --transport http vx https://api.onememory.co/mcp`
+This runs
+`claude mcp add --scope user --transport http vx https://api.onememory.co/mcp`
 and installs the bundled `/vx-memory` slash command. On the first VX tool
 call, Claude Code will open your browser to sign in.
 
@@ -101,6 +114,20 @@ Otherwise it prints the snippet for manual install:
 
 OpenClaw handles the OAuth flow when it first connects to the MCP endpoint.
 
+### ChatGPT
+
+ChatGPT connects to remote MCP servers through ChatGPT Apps / developer mode,
+not a local config file that this CLI can edit.
+
+Use the VX MCP URL when creating the app:
+
+```text
+https://api.onememory.co/mcp
+```
+
+Choose OAuth if prompted. After ChatGPT scans the tools and you enable the app,
+it can use the same hosted VX MCP endpoint as the locally configured clients.
+
 ## Authentication
 
 VX uses standard OAuth 2.1 (RFC 6749) with dynamic client registration
@@ -167,7 +194,7 @@ tools. See your client's tool list after installation.
 ## CLI
 
 ```bash
-vx-mcp install <claude|cursor|codex|openclaw>
+vx-mcp install <all|claude|cursor|codex|openclaw>
 vx-mcp uninstall <claude|cursor|codex|openclaw>
 vx-mcp clients
 vx-mcp --version

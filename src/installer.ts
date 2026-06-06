@@ -35,6 +35,13 @@ export const SUPPORTED_CLIENT_TARGETS: readonly SupportedClientTarget[] = [
   "openclaw",
 ] as const;
 
+const CLIENT_LABELS: Record<SupportedClientTarget, string> = {
+  claude: "Claude Code",
+  cursor: "Cursor",
+  codex: "Codex",
+  openclaw: "OpenClaw",
+};
+
 export type InstallerDeps = {
   copyFileSync: typeof copyFileSync;
   existsSync: typeof existsSync;
@@ -213,7 +220,7 @@ export function installClaude(deps: InstallerDeps = defaultDeps): string[] {
       "Claude Code CLI (`claude`) was not found on PATH. Install Claude Code, then run:",
     );
     notes.push(
-      `  claude mcp add --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}`,
+      `  claude mcp add --scope user --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}`,
     );
     notes.push(
       "Claude Code will open your browser to sign in via OAuth on first use.",
@@ -223,15 +230,19 @@ export function installClaude(deps: InstallerDeps = defaultDeps): string[] {
 
   // Make the install idempotent: if vx is already registered, remove it first
   // so the re-run produces a clean configuration.
-  deps.spawnSync(claudeCli, ["mcp", "remove", VX_MCP_SERVER_NAME], {
-    encoding: "utf8",
-  });
+  deps.spawnSync(
+    claudeCli,
+    ["mcp", "remove", "--scope", "user", VX_MCP_SERVER_NAME],
+    { encoding: "utf8" },
+  );
 
   const addResult = deps.spawnSync(
     claudeCli,
     [
       "mcp",
       "add",
+      "--scope",
+      "user",
       "--transport",
       "http",
       VX_MCP_SERVER_NAME,
@@ -242,7 +253,7 @@ export function installClaude(deps: InstallerDeps = defaultDeps): string[] {
 
   if (addResult.status === 0) {
     notes.push(
-      `Registered VX MCP server with Claude Code: \`claude mcp add --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}\``,
+      `Registered VX MCP server with Claude Code: \`claude mcp add --scope user --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}\``,
     );
     notes.push(
       "On first tool call, Claude Code will open your browser to sign in.",
@@ -254,7 +265,7 @@ export function installClaude(deps: InstallerDeps = defaultDeps): string[] {
       }`,
     );
     notes.push(
-      `Retry manually: claude mcp add --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}`,
+      `Retry manually: claude mcp add --scope user --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}`,
     );
   }
 
@@ -273,7 +284,7 @@ export function uninstallClaude(deps: InstallerDeps = defaultDeps): string[] {
   if (claudeCli) {
     const removeResult = deps.spawnSync(
       claudeCli,
-      ["mcp", "remove", VX_MCP_SERVER_NAME],
+      ["mcp", "remove", "--scope", "user", VX_MCP_SERVER_NAME],
       { encoding: "utf8" },
     );
     if (removeResult.status === 0) {
@@ -287,7 +298,7 @@ export function uninstallClaude(deps: InstallerDeps = defaultDeps): string[] {
     }
   } else {
     notes.push(
-      "Claude Code CLI was not found on PATH. Remove the VX entry manually with `claude mcp remove vx` once Claude Code is installed.",
+      "Claude Code CLI was not found on PATH. Remove the VX entry manually with `claude mcp remove --scope user vx` once Claude Code is installed.",
     );
   }
 
@@ -488,6 +499,21 @@ export function uninstallOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Bulk installer
+// ---------------------------------------------------------------------------
+
+export function installAll(deps: InstallerDeps = defaultDeps): string[] {
+  const notes: string[] = [];
+  for (const target of SUPPORTED_CLIENT_TARGETS) {
+    notes.push(`${CLIENT_LABELS[target]}:`);
+    for (const note of runInstall(target, deps)) {
+      notes.push(`  ${note}`);
+    }
+  }
+  return notes;
+}
+
+// ---------------------------------------------------------------------------
 // CLI dispatch
 // ---------------------------------------------------------------------------
 
@@ -495,8 +521,8 @@ const USAGE = [
   `Usage: vx-mcp <command> [target]`,
   ``,
   `Commands:`,
-  `  install <claude|cursor|codex|openclaw>    Wire up a client to ${VX_MCP_URL}`,
-  `  uninstall <claude|cursor|codex|openclaw>  Remove the VX MCP entry`,
+  `  install <all|claude|cursor|codex|openclaw>  Wire up clients to ${VX_MCP_URL}`,
+  `  uninstall <claude|cursor|codex|openclaw>    Remove the VX MCP entry`,
   `  clients                                   List supported clients`,
   `  --version, -v                             Print package version`,
   `  --help, -h                                Show this message`,
@@ -548,21 +574,37 @@ export async function handleCli(
   }
 
   if (command === "install" || command === "uninstall") {
-    if (!target || !isSupportedClient(target)) {
+    const supportsAll = command === "install" && target === "all";
+    if (!target || (!supportsAll && !isSupportedClient(target))) {
       console.error(
-        `Unknown target ${target ? `\`${target}\`` : "(missing)"}. Supported: ${SUPPORTED_CLIENT_TARGETS.join(", ")}.`,
+        `Unknown target ${target ? `\`${target}\`` : "(missing)"}. Supported: ${
+          command === "install"
+            ? `all, ${SUPPORTED_CLIENT_TARGETS.join(", ")}`
+            : SUPPORTED_CLIENT_TARGETS.join(", ")
+        }.`,
       );
       printHelp();
       return true;
     }
 
-    const notes =
-      command === "install"
-        ? runInstall(target, deps)
-        : runUninstall(target, deps);
+    let notes: string[];
+    if (command === "install" && supportsAll) {
+      notes = installAll(deps);
+    } else if (isSupportedClient(target)) {
+      notes =
+        command === "install"
+          ? runInstall(target, deps)
+          : runUninstall(target, deps);
+    } else {
+      console.error(`Unknown target \`${target}\`.`);
+      printHelp();
+      return true;
+    }
 
     const verb = command === "install" ? "Installed" : "Removed";
-    console.log(`${verb} VX MCP for ${target}.`);
+    console.log(
+      `${verb} VX MCP for ${supportsAll ? "all supported clients" : target}.`,
+    );
     for (const note of notes) {
       console.log(`- ${note}`);
     }
