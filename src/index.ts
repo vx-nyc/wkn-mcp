@@ -4,7 +4,7 @@
  * vx-mcp v1 entrypoint.
  *
  * v1 is HTTP-transport only. This binary is purely an installer for
- * Claude Code / Cursor / Codex / OpenClaw — it writes the right config so
+ * Claude Code / Cursor / Codex / OpenClaw / Hermes — it writes the right config so
  * those clients connect directly to the hosted VX MCP endpoint and complete
  * the OAuth flow on first use. There is no local server, no static
  * credential, and no env-var auth in this package any more.

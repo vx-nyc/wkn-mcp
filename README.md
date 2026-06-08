@@ -27,11 +27,22 @@ API key to manage, and nothing runs locally beyond the wiring step.
 npx @vx-nyc/vx-mcp install all
 ```
 
-This runs the installer for Claude Code, Cursor, Codex, and OpenClaw in one
-pass. Clients that support local config files are updated directly. Clients
+This runs the installer for Claude Code, Cursor, Codex, OpenClaw, and Hermes
+Agent in one pass. Clients that support local config files are updated directly. Clients
 that require their own CLI are configured when the CLI is on your PATH; if a
 CLI is missing, the installer prints the exact manual command or config
 snippet to apply.
+
+Check readiness without changing any local config:
+
+```bash
+npx @vx-nyc/vx-mcp doctor
+```
+
+The doctor reports local config status for Claude Code, Cursor, Codex,
+OpenClaw, Hermes Agent, and the manual ChatGPT remote-MCP setup path. When a
+local runtime is discoverable, it also verifies that the runtime can start so a
+config-only install is not mistaken for a working agent instance.
 
 ### Claude Code
 
@@ -114,6 +125,39 @@ Otherwise it prints the snippet for manual install:
 
 OpenClaw handles the OAuth flow when it first connects to the MCP endpoint.
 
+### Hermes Agent
+
+```bash
+npx @vx-nyc/vx-mcp install hermes
+```
+
+This adds the hosted VX MCP endpoint to `~/.hermes/config.yaml` under
+`mcp_servers` and installs a bundled Hermes skill. Restart Hermes Agent after
+installing so it can discover the VX tools.
+
+Manual equivalent — add this block under `mcp_servers` in
+`~/.hermes/config.yaml`:
+
+```yaml
+mcp_servers:
+  vx:
+    url: "https://api.onememory.co/mcp"
+    headers:
+      X-Counterparty-Id: "hermes:agent"
+      X-Counterparty-Kind: "personal-agent"
+      X-Counterparty-Client: "hermes"
+```
+
+Hermes Agent discovers tools with the `mcp_vx_` prefix and handles OAuth when
+it first connects to the MCP endpoint. The `X-Counterparty-*` headers are
+non-secret provenance hints so VX can label Hermes memories and graph activity
+clearly; they do not grant access.
+
+Run `npx @vx-nyc/vx-mcp doctor` after installing. If Hermes was installed with a
+Linux/ELF `tirith` binary on macOS, the doctor will report the incompatible
+executable and ask for a macOS-compatible Hermes build before VX can verify a
+live Hermes workflow.
+
 ### ChatGPT
 
 ChatGPT connects to remote MCP servers through ChatGPT Apps / developer mode,
@@ -148,6 +192,7 @@ npx @vx-nyc/vx-mcp uninstall claude
 npx @vx-nyc/vx-mcp uninstall cursor
 npx @vx-nyc/vx-mcp uninstall codex
 npx @vx-nyc/vx-mcp uninstall openclaw
+npx @vx-nyc/vx-mcp uninstall hermes
 ```
 
 Each command removes the entry added by the corresponding `install`.
@@ -159,17 +204,22 @@ This package ships host-specific guidance so the memory workflow feels native:
 - Claude Code: `/vx-memory` slash command (installed to `~/.claude/commands/`)
 - Codex: `vx-memory` skill (installed to `~/.codex/skills/`)
 - OpenClaw: `vx-memory` skill packaged with the plugin
+- Hermes Agent: `vx-memory` skill (installed to `~/.hermes/skills/`)
 
 Recommended workflow:
 
-1. Recall first with `vx_recall`.
-2. Use `vx_context` when one topic needs broader continuity.
-3. Use `vx_contexts_list` to inspect existing contexts and `vx_contexts_create`
+1. Load the VX Librarian context with `vx_librarian_context` so the agent gets
+   its purpose and memory policy from VX memory.
+2. Resolve the active reality with `vx_reality` when an agent is joining or
+   continuing a scoped workstream.
+3. Recall first with `vx_recall` for focused questions.
+4. Use `vx_context` when one topic needs broader continuity.
+5. Use `vx_contexts_list` to inspect existing contexts and `vx_contexts_create`
    when a new namespace is needed.
-4. Store new durable facts with `vx_store` one item at a time inside the right
+6. Store new durable facts with `vx_store` one item at a time inside the right
    context.
-5. Use `vx_import_text` or `vx_import_batch` to migrate prior notes or exports.
-6. Never store secrets, tokens, private keys, or credentials.
+7. Use `vx_import_text` or `vx_import_batch` to migrate prior notes or exports.
+8. Never store secrets, tokens, private keys, or credentials.
 
 ## Tools
 
@@ -178,6 +228,8 @@ The hosted MCP server exposes the same VX tool catalog you had in v0.x:
 | Tool | Purpose |
 | --- | --- |
 | `vx_store` | Store one durable fact, preference, decision, or procedure |
+| `vx_librarian_context` | Load the Librarian's purpose, memory policy, and setup guidance from VX memory |
+| `vx_reality` | Resolve the active contexts, delivered memories, capability grants, and exclusions for an agent turn |
 | `vx_recall` | Hybrid recall for focused questions |
 | `vx_query` | Semantic search across stored memory |
 | `vx_list` | Browse stored memory with optional filters |
@@ -194,8 +246,9 @@ tools. See your client's tool list after installation.
 ## CLI
 
 ```bash
-vx-mcp install <all|claude|cursor|codex|openclaw>
-vx-mcp uninstall <claude|cursor|codex|openclaw>
+vx-mcp install <all|claude|cursor|codex|openclaw|hermes>
+vx-mcp uninstall <claude|cursor|codex|openclaw|hermes>
+vx-mcp doctor
 vx-mcp clients
 vx-mcp --version
 vx-mcp --help

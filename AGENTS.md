@@ -5,7 +5,7 @@ Instructions for AI agents working on `@vx-nyc/vx-mcp`, the v1 installer.
 ## What this package is (and isn't)
 
 As of v1.0.0, this package is **only an installer**. It writes config so
-Claude Code, Cursor, Codex, and OpenClaw connect to the hosted VX MCP server
+Claude Code, Cursor, Codex, OpenClaw, and Hermes connect to the hosted VX MCP server
 at `https://api.onememory.co/mcp` over HTTP, with OAuth handled by the
 client. It does not:
 
@@ -57,13 +57,14 @@ This repository is public. Treat it as public at all times.
 ```
 src/
   index.ts         # CLI entry, dispatches to handleCli()
-  installer.ts     # install/uninstall for claude, cursor, codex, openclaw
+  installer.ts     # install/uninstall for claude, cursor, codex, openclaw, hermes
   constants.ts     # canonical URL + package name + server name
 test/
   installer.test.ts
 skills/
   claude/vx-memory/vx-memory.md        # Claude Code slash command body
   codex/vx-memory/SKILL.md             # Codex skill body
+  hermes/vx-memory/SKILL.md            # Hermes Agent skill body
   openclaw/vx-memory/                  # OpenClaw skill bundle
 .claude-plugin/
   plugin.json       # Claude Code marketplace plugin

@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Claude Code installs now use user scope so the VX MCP server is available
   across projects and visible in `claude mcp list`.
+- `doctor` now inspects the Hermes executable format when startup fails, so a
+  Linux/ELF Hermes binary on macOS is reported as a concrete runtime
+  incompatibility instead of only surfacing `ENOEXEC`.
+- Agent setup guidance now starts with `vx_librarian_context` and `vx_reality`
+  so connected agents load purpose, policy, and reality from VX memory instead
+  of copied local prompts.
 
 ## [1.0.0] - 2026-05-10
 

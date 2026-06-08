@@ -1,22 +1,30 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildCodexTomlBlock,
+  buildHermesManagedBlock,
   buildOpenClawPluginConfig,
   CODEX_BLOCK_START,
   CODEX_BLOCK_END,
+  doctor,
+  getClientReadiness,
+  HERMES_BLOCK_START,
   handleCli,
   installAll,
   installClaude,
   installCursor,
   installCodex,
+  installHermes,
   installOpenClaw,
   removeCursorVxEntry,
+  stripHermesManagedBlock,
   stripCodexManagedBlock,
+  uninstallHermes,
   uninstallClaude,
   uninstallCodex,
   uninstallCursor,
   upsertCodexManagedBlock,
   upsertCursorVxEntry,
+  upsertHermesManagedBlock,
   type InstallerDeps,
 } from "../src/installer.js";
 import {
@@ -275,10 +283,118 @@ describe("installCodex", () => {
   });
 });
 
+describe("Hermes config helpers", () => {
+  it("builds a managed Hermes MCP block with an HTTP URL, provenance headers, and no static credentials", () => {
+    const block = buildHermesManagedBlock();
+    expect(block).toContain(HERMES_BLOCK_START);
+    expect(block).toContain("  vx:");
+    expect(block).toContain(`    url: "${VX_URL}"`);
+    expect(block).toContain("headers:");
+    expect(block).toContain('X-Counterparty-Id: "hermes:agent"');
+    expect(block).toContain('X-Counterparty-Kind: "personal-agent"');
+    expect(block).toContain('X-Counterparty-Client: "hermes"');
+    expect(block).not.toContain("Authorization");
+    expect(block).not.toContain("apiKey");
+    expect(block).not.toContain("bearerToken");
+  });
+
+  it("adds mcp_servers when Hermes config is empty", () => {
+    const next = upsertHermesManagedBlock("");
+    expect(next).toContain("mcp_servers:");
+    expect(next).toContain(`url: "${VX_URL}"`);
+  });
+
+  it("preserves existing Hermes MCP servers and is idempotent", () => {
+    const current = [
+      "theme: dark",
+      "",
+      "mcp_servers:",
+      "  time:",
+      "    command: \"uvx\"",
+      "    args: [\"mcp-server-time\"]",
+    ].join("\n");
+
+    const once = upsertHermesManagedBlock(current);
+    const twice = upsertHermesManagedBlock(once);
+
+    expect(twice).toContain("  time:");
+    expect(twice).toContain("    command: \"uvx\"");
+    expect((twice.match(new RegExp(HERMES_BLOCK_START, "g")) || []).length).toBe(1);
+  });
+
+  it("strips only the managed Hermes VX block", () => {
+    const current = upsertHermesManagedBlock([
+      "mcp_servers:",
+      "  time:",
+      "    command: \"uvx\"",
+    ].join("\n"));
+
+    const stripped = stripHermesManagedBlock(current);
+    expect(stripped).toContain("  time:");
+    expect(stripped).not.toContain(HERMES_BLOCK_START);
+    expect(stripped).not.toContain(`url: "${VX_URL}"`);
+  });
+});
+
+describe("installHermes", () => {
+  it("writes ~/.hermes/config.yaml with the HTTP MCP entry and copies the skill", () => {
+    const deps = createDeps();
+    const notes = installHermes(deps);
+    const configPath = join(deps.homedir(), ".hermes", "config.yaml");
+    const skillPath = join(deps.homedir(), ".hermes", "skills", "vx-memory", "SKILL.md");
+    const config = readFileSync(configPath, "utf8");
+
+    expect(existsSync(skillPath)).toBe(true);
+    expect(config).toContain("mcp_servers:");
+    expect(config).toContain("  vx:");
+    expect(config).toContain(`url: "${VX_URL}"`);
+    expect(config).toContain('X-Counterparty-Client: "hermes"');
+    expect(notes.join("\n")).toContain("Restart Hermes Agent");
+  });
+
+  it("is idempotent across repeat installs", () => {
+    const deps = createDeps();
+    installHermes(deps);
+    installHermes(deps);
+    const config = readFileSync(
+      join(deps.homedir(), ".hermes", "config.yaml"),
+      "utf8",
+    );
+    expect((config.match(new RegExp(HERMES_BLOCK_START, "g")) || []).length).toBe(1);
+  });
+
+  it("uninstall strips the managed block but preserves other Hermes config", () => {
+    const deps = createDeps();
+    const hermesHome = join(deps.homedir(), ".hermes");
+    mkdirSync(hermesHome, { recursive: true });
+    writeFileSync(
+      join(hermesHome, "config.yaml"),
+      upsertHermesManagedBlock([
+        "theme: dark",
+        "mcp_servers:",
+        "  time:",
+        "    command: \"uvx\"",
+      ].join("\n")),
+      "utf8",
+    );
+
+    uninstallHermes(deps);
+    const config = readFileSync(join(hermesHome, "config.yaml"), "utf8");
+    expect(config).toContain("theme: dark");
+    expect(config).toContain("  time:");
+    expect(config).not.toContain(HERMES_BLOCK_START);
+    expect(config).not.toContain(`url: "${VX_URL}"`);
+  });
+});
+
 describe("installOpenClaw", () => {
   it("falls back to manual instructions when the CLI is missing", () => {
     const deps = createDeps();
-    mockSpawn(deps, { status: 1 });
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v openclaw
+      { status: 1 }, // command -v npx
+    );
     const notes = installOpenClaw(deps);
     expect(notes.join("\n")).toContain("openclaw plugins install @vx-nyc/vx-mcp");
     expect(notes.join("\n")).toContain(VX_URL);
@@ -319,7 +435,349 @@ describe("installAll", () => {
     expect(notes).toContain("Cursor");
     expect(notes).toContain("Codex");
     expect(notes).toContain("OpenClaw");
+    expect(notes).toContain("Hermes Agent");
     expect(notes).toContain("openclaw plugins install @vx-nyc/vx-mcp");
+    expect(existsSync(join(deps.homedir(), ".hermes", "config.yaml"))).toBe(true);
+  });
+});
+
+describe("doctor/readiness", () => {
+  it("reports Cursor and Codex as ready when their configs point to VX", () => {
+    const deps = createDeps();
+    installCursor(deps);
+    installCodex(deps);
+
+    expect(getClientReadiness("cursor", deps)).toMatchObject({
+      label: "Cursor",
+      status: "ready",
+    });
+    expect(getClientReadiness("codex", deps)).toMatchObject({
+      label: "Codex",
+      status: "ready",
+    });
+  });
+
+  it("reports Hermes ready only when config is present and the runtime is executable", () => {
+    const deps = createDeps();
+    installHermes(deps);
+    const hermesBin = join(deps.homedir(), ".hermes", "bin");
+    mkdirSync(hermesBin, { recursive: true });
+    writeFileSync(join(hermesBin, "tirith"), "", "utf8");
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v hermes
+      { status: 1 }, // command -v tirith
+      { status: 0, stdout: "Hermes Agent 1.0.0\n" },
+    );
+
+    expect(getClientReadiness("hermes", deps)).toMatchObject({
+      label: "Hermes Agent",
+      status: "ready",
+    });
+  });
+
+  it("reports Hermes runtime errors instead of marking config-only installs ready", () => {
+    const deps = createDeps();
+    installHermes(deps);
+    const hermesBin = join(deps.homedir(), ".hermes", "bin");
+    mkdirSync(hermesBin, { recursive: true });
+    writeFileSync(join(hermesBin, "tirith"), "", "utf8");
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v hermes
+      { status: 1 }, // command -v tirith
+      { status: 126, stderr: "exec format error\n" },
+      {
+        status: 0,
+        stdout:
+          "/tmp/.hermes/bin/tirith: ELF 64-bit LSB pie executable, ARM aarch64, for GNU/Linux\n",
+      },
+    );
+
+    expect(getClientReadiness("hermes", deps)).toMatchObject({
+      label: "Hermes Agent",
+      status: "runtime-error",
+      notes: expect.arrayContaining([
+        expect.stringContaining("exec format error"),
+        expect.stringContaining("Linux/ELF binary"),
+        expect.stringContaining("macOS-compatible Hermes build"),
+      ]),
+    });
+  });
+
+  it("reports Docker Hermes as present but not ready when VX MCP OAuth is pending", () => {
+    const deps = createDeps();
+    installHermes(deps);
+    const hermesBin = join(deps.homedir(), ".hermes", "bin");
+    mkdirSync(hermesBin, { recursive: true });
+    writeFileSync(join(hermesBin, "tirith"), "", "utf8");
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v hermes
+      { status: 1 }, // command -v tirith
+      { status: 126, stderr: "exec format error\n" },
+      {
+        status: 0,
+        stdout:
+          "/tmp/.hermes/bin/tirith: ELF 64-bit LSB pie executable, ARM aarch64, for GNU/Linux\n",
+      },
+      { status: 0, stdout: "hermes-dashboard\n" },
+      { status: 0, stdout: "Hermes Agent v0.14.0\nProject: /opt/hermes\n" },
+      {
+        status: 0,
+        stdout:
+          "Name Transport Tools Status\nvx https://api.onememory.co/mcp all ✓ enabled\n",
+      },
+      {
+        status: 0,
+        stdout:
+          "Testing 'vx'...\n✗ Connection failed: Client error '401 Unauthorized' for url 'https://api.onememory.co/mcp'\n",
+      },
+    );
+
+    expect(getClientReadiness("hermes", deps)).toMatchObject({
+      label: "Hermes Agent",
+      status: "manual-approval",
+      notes: expect.arrayContaining([
+        expect.stringContaining("Hermes Docker container 'hermes-dashboard' is running"),
+        expect.stringContaining("MCP config lists the hosted VX endpoint"),
+        expect.stringContaining("OAuth is not complete"),
+        expect.stringContaining("401 Unauthorized"),
+        expect.stringContaining("Host Hermes executable is not usable"),
+      ]),
+    });
+  });
+
+  it("reports Claude Code ready when `claude mcp list` says VX is connected", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".claude", "commands"), { recursive: true });
+    writeFileSync(join(deps.homedir(), ".claude", "commands", "vx-memory.md"), "# VX\n", "utf8");
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "/usr/local/bin/claude\n" },
+      { status: 0, stdout: "vx: https://api.onememory.co/mcp (HTTP) - ✓ Connected\n" },
+    );
+
+    expect(getClientReadiness("claude", deps)).toMatchObject({
+      label: "Claude Code",
+      status: "ready",
+      notes: ["Claude Code reports the VX MCP server is connected."],
+    });
+  });
+
+  it("reports Claude Code manual when VX is registered but OAuth is pending", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".claude", "commands"), { recursive: true });
+    writeFileSync(join(deps.homedir(), ".claude", "commands", "vx-memory.md"), "# VX\n", "utf8");
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "/usr/local/bin/claude\n" },
+      { status: 0, stdout: "vx: https://api.onememory.co/mcp (HTTP) - ! Needs authentication\n" },
+    );
+
+    expect(getClientReadiness("claude", deps)).toMatchObject({
+      label: "Claude Code",
+      status: "manual-approval",
+    });
+  });
+
+  it("reports Claude Code needs install when the CLI list has no VX entry", () => {
+    const deps = createDeps();
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "/usr/local/bin/claude\n" },
+      { status: 0, stdout: "github: https://example.com/mcp - ✓ Connected\n" },
+    );
+
+    expect(getClientReadiness("claude", deps)).toMatchObject({
+      label: "Claude Code",
+      status: "needs-install",
+      notes: expect.arrayContaining(["Run: vx-mcp install claude"]),
+    });
+  });
+
+  it("recognizes OpenClaw dev MCP config even when the CLI is not on PATH", () => {
+    const deps = createDeps();
+    const configPath = join(deps.homedir(), ".openclaw-dev", "openclaw.json");
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          mcp: {
+            servers: {
+              vx: {
+                url: "http://localhost:3000/mcp",
+                transport: "streamable-http",
+                headers: { "X-API-Key": "vx_test_local" },
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v openclaw
+      { status: 1 }, // command -v npx
+    );
+
+    expect(getClientReadiness("openclaw", deps)).toMatchObject({
+      label: "OpenClaw",
+      status: "manual-approval",
+      notes: expect.arrayContaining([
+        expect.stringContaining("OpenClaw MCP config includes VX"),
+        expect.stringContaining("http://localhost:3000/mcp"),
+        expect.stringContaining("OpenClaw CLI is not on PATH"),
+      ]),
+    });
+  });
+
+  it("uses npx OpenClaw probe to distinguish MCP connectivity from missing model auth", () => {
+    const deps = createDeps();
+    const configPath = join(deps.homedir(), ".openclaw-dev", "openclaw.json");
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          mcp: {
+            servers: {
+              vx: {
+                url: "http://localhost:3000/mcp",
+                transport: "streamable-http",
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v openclaw
+      { status: 0, stdout: "/usr/bin/npx\n" }, // command -v npx
+      {
+        status: 0,
+        stdout: JSON.stringify({
+          servers: { vx: { launch: "http://localhost:3000/mcp", tools: 23 } },
+          tools: Array.from({ length: 23 }, (_, index) => `vx__tool_${index}`),
+          diagnostics: [],
+        }),
+      },
+      {
+        status: 0,
+        stdout:
+          "Auth overview\nProviders w/ OAuth/tokens (0): -\n\nMissing auth\n- openai Run `openclaw --profile dev models auth login --provider openai`",
+      },
+    );
+
+    expect(getClientReadiness("openclaw", deps)).toMatchObject({
+      label: "OpenClaw",
+      status: "manual-approval",
+      notes: expect.arrayContaining([
+        expect.stringContaining("npx OpenClaw MCP probe discovered 23 tools"),
+        expect.stringContaining("model auth is still missing"),
+      ]),
+    });
+    expect(vi.mocked(deps.spawnSync).mock.calls[2]?.[1]).toEqual([
+      "-y",
+      "openclaw",
+      "--dev",
+      "mcp",
+      "probe",
+      "vx",
+      "--json",
+    ]);
+  });
+
+  it("treats local Ollama marker auth as ready for OpenClaw live turns", () => {
+    const deps = createDeps();
+    const configPath = join(deps.homedir(), ".openclaw-dev", "openclaw.json");
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          mcp: {
+            servers: {
+              vx: {
+                url: "http://localhost:3000/mcp",
+                transport: "streamable-http",
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v openclaw
+      { status: 0, stdout: "/usr/bin/npx\n" }, // command -v npx
+      {
+        status: 0,
+        stdout: JSON.stringify({
+          servers: { vx: { launch: "http://localhost:3000/mcp", tools: 23 } },
+          tools: Array.from({ length: 23 }, (_, index) => `vx__tool_${index}`),
+          diagnostics: [],
+        }),
+      },
+      {
+        status: 0,
+        stdout: [
+          "Default       : ollama/qwen3.6:35b-mlx",
+          "Configured models (1): ollama/qwen3.6:35b-mlx",
+          "",
+          "Auth overview",
+          "Providers w/ OAuth/tokens (0): -",
+          "- ollama effective=models.json:marker(ollama-local) | models.json=marker(ollama-local)",
+          "",
+          "OAuth/token status",
+          "- none",
+        ].join("\n"),
+      },
+    );
+
+    expect(getClientReadiness("openclaw", deps)).toMatchObject({
+      label: "OpenClaw",
+      status: "ready",
+      notes: expect.arrayContaining([
+        expect.stringContaining("npx OpenClaw MCP probe discovered 23 tools"),
+        expect.stringContaining("model auth appears configured"),
+      ]),
+    });
+  });
+
+  it("reports missing local CLIs without mutating user config", () => {
+    const deps = createDeps();
+    mockSpawn(
+      deps,
+      { status: 1 }, // claude lookup
+      { status: 1 }, // openclaw lookup
+    );
+
+    const beforeCodex = existsSync(join(deps.homedir(), ".codex", "config.toml"));
+    const lines = doctor(deps).join("\n");
+    const afterCodex = existsSync(join(deps.homedir(), ".codex", "config.toml"));
+
+    expect(beforeCodex).toBe(false);
+    expect(afterCodex).toBe(false);
+    expect(lines).toContain("Claude Code: missing-cli");
+    expect(lines).toContain("OpenClaw: missing-cli");
+    expect(lines).toContain("ChatGPT: manual");
+    expect(lines).toContain("vx-mcp install cursor");
+    expect(lines).toContain("vx-mcp install hermes");
+    expect(lines).toContain("vx_librarian_context");
+    expect(lines).toContain("vx_reality");
+    expect(lines).toContain("Do not copy VX policy into local prompts");
   });
 });
 
@@ -371,6 +829,22 @@ describe("handleCli", () => {
     await handleCli(["install", "all"], deps);
     expect(existsSync(join(deps.homedir(), ".cursor", "mcp.json"))).toBe(true);
     expect(existsSync(join(deps.homedir(), ".codex", "config.toml"))).toBe(true);
+    expect(existsSync(join(deps.homedir(), ".hermes", "config.yaml"))).toBe(true);
+  });
+
+  it("dispatches doctor", async () => {
+    const deps = createDeps();
+    mockSpawn(
+      deps,
+      { status: 1 }, // claude lookup
+      { status: 1 }, // openclaw lookup
+    );
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await handleCli(["doctor"], deps);
+    const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(output).toContain("VX MCP readiness");
+    expect(output).toContain("ChatGPT");
+    expect(output).toContain("vx_librarian_context");
   });
 });
 
