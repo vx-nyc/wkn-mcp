@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Agent setup guidance now includes `vx_librarian_seed` as the normal MCP tool
+  path for initializing Librarian reality as VX memories, instead of copying
+  policy into local prompts.
+- OpenClaw installs and readiness checks include `vx_librarian_seed` in the
+  core VX tool filter.
+
 ## [1.0.1] - 2026-06-06
 
 ### Added

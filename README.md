@@ -208,18 +208,21 @@ This package ships host-specific guidance so the memory workflow feels native:
 
 Recommended workflow:
 
-1. Load the VX Librarian context with `vx_librarian_context` so the agent gets
+1. If the `vx-librarian` context is empty, call `vx_librarian_seed` once. This
+   stores the Librarian's governing purpose and memory policy as normal VX
+   memories instead of copying that policy into local prompts.
+2. Load the VX Librarian context with `vx_librarian_context` so the agent gets
    its purpose and memory policy from VX memory.
-2. Resolve the active reality with `vx_reality` when an agent is joining or
+3. Resolve the active reality with `vx_reality` when an agent is joining or
    continuing a scoped workstream.
-3. Recall first with `vx_recall` for focused questions.
-4. Use `vx_context` when one topic needs broader continuity.
-5. Use `vx_contexts_list` to inspect existing contexts and `vx_contexts_create`
+4. Recall first with `vx_recall` for focused questions.
+5. Use `vx_context` when one topic needs broader continuity.
+6. Use `vx_contexts_list` to inspect existing contexts and `vx_contexts_create`
    when a new namespace is needed.
-6. Store new durable facts with `vx_store` one item at a time inside the right
+7. Store new durable facts with `vx_store` one item at a time inside the right
    context.
-7. Use `vx_import_text` or `vx_import_batch` to migrate prior notes or exports.
-8. Never store secrets, tokens, private keys, or credentials.
+8. Use `vx_import_text` or `vx_import_batch` to migrate prior notes or exports.
+9. Never store secrets, tokens, private keys, or credentials.
 
 ## Tools
 
@@ -228,10 +231,11 @@ The hosted MCP server exposes the same VX tool catalog you had in v0.x:
 | Tool | Purpose |
 | --- | --- |
 | `vx_store` | Store one durable fact, preference, decision, or procedure |
+| `vx_librarian_seed` | Initialize or refresh the Librarian's governed context as VX memories |
 | `vx_librarian_context` | Load the Librarian's purpose, memory policy, and setup guidance from VX memory |
 | `vx_reality` | Resolve the active contexts, delivered memories, capability grants, and exclusions for an agent turn |
-| `vx_recall` | Hybrid recall for focused questions |
-| `vx_query` | Semantic search across stored memory |
+| `vx_recall` | Recall durable VX memory relevant to the current question |
+| `vx_query` | Search stored VX memory for named procedures, entities, or prior context |
 | `vx_list` | Browse stored memory with optional filters |
 | `vx_delete` | Remove a memory by ID |
 | `vx_context` | Build a broader context packet for one topic |

@@ -47,8 +47,13 @@ const CLIENT_LABELS: Record<SupportedClientTarget, string> = {
   hermes: "Hermes Agent",
 };
 
-const REQUIRED_OPENCLAW_VX_TOOLS = ["vx_librarian_context", "vx_reality"] as const;
+const REQUIRED_OPENCLAW_VX_TOOLS = [
+  "vx_librarian_seed",
+  "vx_librarian_context",
+  "vx_reality",
+] as const;
 const RECOMMENDED_OPENCLAW_VX_TOOLS = [
+  "vx_librarian_seed",
   "vx_librarian_context",
   "vx_reality",
   "vx_recall",
@@ -1275,8 +1280,9 @@ export function doctor(deps: InstallerDeps = defaultDeps): string[] {
   }
   lines.push("");
   lines.push("First agent check:");
-  lines.push("  1. Call vx_librarian_context to load VX purpose and memory policy from VX memory.");
-  lines.push("  2. Call vx_reality with the context the agent should use.");
+  lines.push("  1. If the vx-librarian context is empty, call vx_librarian_seed once.");
+  lines.push("  2. Call vx_librarian_context to load VX purpose and memory policy from VX memory.");
+  lines.push("  3. Call vx_reality with the context the agent should use.");
   lines.push("  Do not copy VX policy into local prompts; keep agent reality in VX contexts.");
   return lines;
 }

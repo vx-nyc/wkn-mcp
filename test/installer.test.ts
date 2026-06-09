@@ -419,7 +419,7 @@ describe("installOpenClaw", () => {
       "tools",
       "vx",
       "--include",
-      "vx_librarian_context,vx_reality,vx_recall,vx_store",
+      "vx_librarian_seed,vx_librarian_context,vx_reality,vx_recall,vx_store",
     ]);
     expect(notes.join("\n")).toContain("Installed the VX plugin for OpenClaw");
     expect(notes.join("\n")).toContain("Exposed the core VX MCP tools for OpenClaw");
@@ -674,8 +674,9 @@ describe("doctor/readiness", () => {
       {
         status: 0,
         stdout: JSON.stringify({
-          servers: { vx: { launch: "http://localhost:3000/mcp", tools: 23 } },
+          servers: { vx: { launch: "http://localhost:3000/mcp", tools: 24 } },
           tools: [
+            "vx__vx_librarian_seed",
             "vx__vx_librarian_context",
             "vx__vx_reality",
             ...Array.from({ length: 21 }, (_, index) => `vx__tool_${index}`),
@@ -694,7 +695,7 @@ describe("doctor/readiness", () => {
       label: "OpenClaw",
       status: "manual-approval",
       notes: expect.arrayContaining([
-        expect.stringContaining("npx OpenClaw MCP probe discovered 23 tools"),
+        expect.stringContaining("npx OpenClaw MCP probe discovered 24 tools"),
         expect.stringContaining("model auth is still missing"),
       ]),
     });
@@ -738,8 +739,9 @@ describe("doctor/readiness", () => {
       {
         status: 0,
         stdout: JSON.stringify({
-          servers: { vx: { launch: "http://localhost:3000/mcp", tools: 23 } },
+          servers: { vx: { launch: "http://localhost:3000/mcp", tools: 24 } },
           tools: [
+            "vx__vx_librarian_seed",
             "vx__vx_librarian_context",
             "vx__vx_reality",
             ...Array.from({ length: 21 }, (_, index) => `vx__tool_${index}`),
@@ -767,7 +769,7 @@ describe("doctor/readiness", () => {
       label: "OpenClaw",
       status: "ready",
       notes: expect.arrayContaining([
-        expect.stringContaining("npx OpenClaw MCP probe discovered 23 tools"),
+        expect.stringContaining("npx OpenClaw MCP probe discovered 24 tools"),
         expect.stringContaining("model auth appears configured"),
       ]),
     });
@@ -807,8 +809,8 @@ describe("doctor/readiness", () => {
       label: "OpenClaw",
       status: "manual-approval",
       notes: expect.arrayContaining([
-        expect.stringContaining("tool filter excludes vx_librarian_context"),
-        expect.stringContaining("openclaw mcp tools vx --include vx_librarian_context,vx_reality,vx_recall,vx_store"),
+        expect.stringContaining("tool filter excludes vx_librarian_seed, vx_librarian_context"),
+        expect.stringContaining("openclaw mcp tools vx --include vx_librarian_seed,vx_librarian_context,vx_reality,vx_recall,vx_store"),
       ]),
     });
   });
@@ -853,8 +855,8 @@ describe("doctor/readiness", () => {
       label: "OpenClaw",
       status: "manual-approval",
       notes: expect.arrayContaining([
-        expect.stringContaining("not the required VX tools: vx_librarian_context"),
-        expect.stringContaining("openclaw mcp tools vx --include vx_librarian_context,vx_reality,vx_recall,vx_store"),
+        expect.stringContaining("not the required VX tools: vx_librarian_seed, vx_librarian_context"),
+        expect.stringContaining("openclaw mcp tools vx --include vx_librarian_seed,vx_librarian_context,vx_reality,vx_recall,vx_store"),
       ]),
     });
   });
@@ -878,6 +880,7 @@ describe("doctor/readiness", () => {
     expect(lines).toContain("ChatGPT: manual");
     expect(lines).toContain("vx-mcp install cursor");
     expect(lines).toContain("vx-mcp install hermes");
+    expect(lines).toContain("vx_librarian_seed");
     expect(lines).toContain("vx_librarian_context");
     expect(lines).toContain("vx_reality");
     expect(lines).toContain("Do not copy VX policy into local prompts");
@@ -947,6 +950,7 @@ describe("handleCli", () => {
     const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
     expect(output).toContain("VX MCP readiness");
     expect(output).toContain("ChatGPT");
+    expect(output).toContain("vx_librarian_seed");
     expect(output).toContain("vx_librarian_context");
   });
 });
