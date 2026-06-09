@@ -282,7 +282,10 @@ npm run build
 npm test
 ```
 
-This package is published from `main` to GitHub Packages on tag push. See
-`CHANGELOG.md` for release notes.
+This package is released through `manual-package-release.yml`: merge to `main`,
+run the workflow with a new `vX.Y.Z` tag, and let it dispatch `publish.yml`.
+`publish.yml` can also be run manually with an existing tag for retries. It
+publishes to GitHub Packages and creates the GitHub Release notes. See
+`CHANGELOG.md` for release history.
 
 See `CONTRIBUTING.md` for contributor workflow and public-repo safety rules.
