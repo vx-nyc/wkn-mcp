@@ -47,6 +47,14 @@ const CLIENT_LABELS: Record<SupportedClientTarget, string> = {
   hermes: "Hermes Agent",
 };
 
+const REQUIRED_OPENCLAW_VX_TOOLS = ["vx_librarian_context", "vx_reality"] as const;
+const RECOMMENDED_OPENCLAW_VX_TOOLS = [
+  "vx_librarian_context",
+  "vx_reality",
+  "vx_recall",
+  "vx_store",
+] as const;
+
 export type ReadinessStatus =
   | "ready"
   | "needs-install"
@@ -138,7 +146,7 @@ function openClawProfileArgs(configPath: string, deps: InstallerDeps): string[] 
 }
 
 function openClawProbeReadiness(
-  config: { path: string; url: string },
+  config: { path: string; url: string; missingRequiredTools: string[] },
   deps: InstallerDeps,
 ): Pick<ClientReadiness, "status" | "notes"> | null {
   const npxCli = findCli("npx", deps);
@@ -160,22 +168,47 @@ function openClawProbeReadiness(
       notes: [
         `OpenClaw MCP config includes VX at ${config.path}.`,
         `VX endpoint: ${config.url}`,
+        ...(config.missingRequiredTools.length > 0
+          ? [openClawToolFilterFixNote(config.missingRequiredTools)]
+          : []),
         `npx can run OpenClaw, but VX MCP probe did not pass yet: ${firstLine(probeOutput) || `exit ${probe.status ?? "unknown"}`}.`,
       ],
     };
   }
 
   let toolCount = 0;
+  let probedTools: string[] | null = null;
   try {
     const parsed = JSON.parse(probe.stdout ?? "{}") as {
       servers?: Record<string, { tools?: number }>;
       tools?: unknown[];
     };
+    probedTools = Array.isArray(parsed.tools)
+      ? parsed.tools.filter((tool): tool is string => typeof tool === "string")
+      : null;
     toolCount =
       parsed.servers?.[VX_MCP_SERVER_NAME]?.tools ??
-      (Array.isArray(parsed.tools) ? parsed.tools.length : 0);
+      (probedTools ? probedTools.length : 0);
   } catch {
     toolCount = 0;
+  }
+
+  const missingRequiredTools =
+    config.missingRequiredTools.length > 0
+      ? config.missingRequiredTools
+      : probedTools
+        ? missingRequiredOpenClawTools(probedTools)
+        : [];
+  if (missingRequiredTools.length > 0) {
+    return {
+      status: "manual-approval",
+      notes: [
+        `OpenClaw MCP config includes VX at ${config.path}.`,
+        `VX endpoint: ${config.url}`,
+        `npx OpenClaw MCP probe discovered ${toolCount || "VX"} tools, but not the required VX tools: ${missingRequiredTools.join(", ")}.`,
+        openClawToolFilterFixNote(missingRequiredTools),
+      ],
+    };
   }
 
   const models = deps.spawnSync(
@@ -835,6 +868,9 @@ type OpenClawMcpServerEntry = {
   url?: string;
   transport?: string;
   headers?: Record<string, string>;
+  toolFilter?: {
+    include?: unknown;
+  };
 };
 
 type OpenClawConfigFile = {
@@ -856,13 +892,37 @@ function openClawConfigPathCandidates(deps: InstallerDeps): string[] {
   return [...new Set(candidates)];
 }
 
-function openClawVxConfig(deps: InstallerDeps): { path: string; url: string } | null {
+function openClawToolNamesInclude(tools: string[], toolName: string): boolean {
+  return tools.includes(toolName) || tools.includes(`vx__${toolName}`);
+}
+
+function missingRequiredOpenClawTools(tools: string[]): string[] {
+  return REQUIRED_OPENCLAW_VX_TOOLS.filter((toolName) => !openClawToolNamesInclude(tools, toolName));
+}
+
+function openClawConfiguredToolFilterMissing(entry: OpenClawMcpServerEntry): string[] {
+  const include = entry.toolFilter?.include;
+  if (!Array.isArray(include)) return [];
+  const tools = include.filter((tool): tool is string => typeof tool === "string");
+  if (tools.length === 0) return [];
+  return missingRequiredOpenClawTools(tools);
+}
+
+function openClawToolFilterFixNote(missing: string[]): string {
+  return `OpenClaw VX tool filter excludes ${missing.join(", ")}. Remove the filter or run: openclaw mcp tools ${VX_MCP_SERVER_NAME} --include ${RECOMMENDED_OPENCLAW_VX_TOOLS.join(",")}`;
+}
+
+function openClawVxConfig(deps: InstallerDeps): { path: string; url: string; missingRequiredTools: string[] } | null {
   for (const path of openClawConfigPathCandidates(deps)) {
     const config = readJsonFile<OpenClawConfigFile>(path, deps);
     const entry = config?.mcp?.servers?.[VX_MCP_SERVER_NAME];
     const url = entry && typeof entry === "object" ? (entry as OpenClawMcpServerEntry).url : "";
     if (typeof url === "string" && /\/mcp\/?$/i.test(url)) {
-      return { path, url };
+      return {
+        path,
+        url,
+        missingRequiredTools: openClawConfiguredToolFilterMissing(entry as OpenClawMcpServerEntry),
+      };
     }
   }
 
@@ -929,6 +989,31 @@ export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
     notes.push(
       `Installed the VX plugin for OpenClaw: \`openclaw plugins install ${VX_PACKAGE_NAME}\``,
     );
+    const toolResult = deps.spawnSync(
+      openclawCli,
+      [
+        "mcp",
+        "tools",
+        VX_MCP_SERVER_NAME,
+        "--include",
+        RECOMMENDED_OPENCLAW_VX_TOOLS.join(","),
+      ],
+      { encoding: "utf8" },
+    );
+    if (toolResult.status === 0) {
+      notes.push(
+        `Exposed the core VX MCP tools for OpenClaw: ${RECOMMENDED_OPENCLAW_VX_TOOLS.join(", ")}`,
+      );
+    } else {
+      notes.push(
+        `OpenClaw plugin installed, but the VX tool filter could not be updated automatically: ${
+          toolResult.stderr?.trim() || toolResult.stdout?.trim() || "unknown error"
+        }`,
+      );
+      notes.push(
+        `Run manually: openclaw mcp tools ${VX_MCP_SERVER_NAME} --include ${RECOMMENDED_OPENCLAW_VX_TOOLS.join(",")}`,
+      );
+    }
   } else {
     notes.push(
       `OpenClaw CLI was found but plugin installation failed: ${
@@ -1101,6 +1186,18 @@ export function getClientReadiness(
         };
       }
       if (config && cli) {
+        if (config.missingRequiredTools.length > 0) {
+          return {
+            target,
+            label: CLIENT_LABELS.openclaw,
+            status: "manual-approval",
+            notes: [
+              `OpenClaw MCP config includes VX at ${config.path}.`,
+              `VX endpoint: ${config.url}`,
+              openClawToolFilterFixNote(config.missingRequiredTools),
+            ],
+          };
+        }
         return {
           target,
           label: CLIENT_LABELS.openclaw,

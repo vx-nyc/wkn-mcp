@@ -406,6 +406,7 @@ describe("installOpenClaw", () => {
       deps,
       { status: 0, stdout: "/usr/local/bin/openclaw\n" },
       { status: 0 },
+      { status: 0 },
     );
     const notes = installOpenClaw(deps);
     expect(vi.mocked(deps.spawnSync).mock.calls[1]?.[1]).toEqual([
@@ -413,7 +414,15 @@ describe("installOpenClaw", () => {
       "install",
       "@vx-nyc/vx-mcp",
     ]);
+    expect(vi.mocked(deps.spawnSync).mock.calls[2]?.[1]).toEqual([
+      "mcp",
+      "tools",
+      "vx",
+      "--include",
+      "vx_librarian_context,vx_reality,vx_recall,vx_store",
+    ]);
     expect(notes.join("\n")).toContain("Installed the VX plugin for OpenClaw");
+    expect(notes.join("\n")).toContain("Exposed the core VX MCP tools for OpenClaw");
   });
 });
 
@@ -666,7 +675,11 @@ describe("doctor/readiness", () => {
         status: 0,
         stdout: JSON.stringify({
           servers: { vx: { launch: "http://localhost:3000/mcp", tools: 23 } },
-          tools: Array.from({ length: 23 }, (_, index) => `vx__tool_${index}`),
+          tools: [
+            "vx__vx_librarian_context",
+            "vx__vx_reality",
+            ...Array.from({ length: 21 }, (_, index) => `vx__tool_${index}`),
+          ],
           diagnostics: [],
         }),
       },
@@ -726,7 +739,11 @@ describe("doctor/readiness", () => {
         status: 0,
         stdout: JSON.stringify({
           servers: { vx: { launch: "http://localhost:3000/mcp", tools: 23 } },
-          tools: Array.from({ length: 23 }, (_, index) => `vx__tool_${index}`),
+          tools: [
+            "vx__vx_librarian_context",
+            "vx__vx_reality",
+            ...Array.from({ length: 21 }, (_, index) => `vx__tool_${index}`),
+          ],
           diagnostics: [],
         }),
       },
@@ -752,6 +769,92 @@ describe("doctor/readiness", () => {
       notes: expect.arrayContaining([
         expect.stringContaining("npx OpenClaw MCP probe discovered 23 tools"),
         expect.stringContaining("model auth appears configured"),
+      ]),
+    });
+  });
+
+  it("reports an OpenClaw VX tool filter that hides the librarian context tool", () => {
+    const deps = createDeps();
+    const configPath = join(deps.homedir(), ".openclaw-dev", "openclaw.json");
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          mcp: {
+            servers: {
+              vx: {
+                url: "http://localhost:3000/mcp",
+                transport: "streamable-http",
+                toolFilter: {
+                  include: ["vx_reality", "vx_recall", "vx_store"],
+                },
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "/usr/local/bin/openclaw\n" },
+    );
+
+    expect(getClientReadiness("openclaw", deps)).toMatchObject({
+      label: "OpenClaw",
+      status: "manual-approval",
+      notes: expect.arrayContaining([
+        expect.stringContaining("tool filter excludes vx_librarian_context"),
+        expect.stringContaining("openclaw mcp tools vx --include vx_librarian_context,vx_reality,vx_recall,vx_store"),
+      ]),
+    });
+  });
+
+  it("reports an OpenClaw probe that cannot see required VX tools", () => {
+    const deps = createDeps();
+    const configPath = join(deps.homedir(), ".openclaw-dev", "openclaw.json");
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          mcp: {
+            servers: {
+              vx: {
+                url: "http://localhost:3000/mcp",
+                transport: "streamable-http",
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v openclaw
+      { status: 0, stdout: "/usr/bin/npx\n" },
+      {
+        status: 0,
+        stdout: JSON.stringify({
+          servers: { vx: { launch: "http://localhost:3000/mcp", tools: 3 } },
+          tools: ["vx__vx_reality", "vx__vx_recall", "vx__vx_store"],
+          diagnostics: [],
+        }),
+      },
+    );
+
+    expect(getClientReadiness("openclaw", deps)).toMatchObject({
+      label: "OpenClaw",
+      status: "manual-approval",
+      notes: expect.arrayContaining([
+        expect.stringContaining("not the required VX tools: vx_librarian_context"),
+        expect.stringContaining("openclaw mcp tools vx --include vx_librarian_context,vx_reality,vx_recall,vx_store"),
       ]),
     });
   });
