@@ -340,4 +340,9 @@ access to the npm package; GitHub Packages is not used for the public installer
 because the documented `npx @vx-nyc/vx-mcp ...` commands must work without a
 GitHub Packages token. See `CHANGELOG.md` for release history.
 
+`manual-package-release.yml` validates `NPM_TOKEN` with npm before creating a
+tag so an expired token cannot leave a half-created release. If a publish retry
+is needed after a tag already exists, run `publish.yml` manually with that
+existing tag instead of creating a new one.
+
 See `CONTRIBUTING.md` for contributor workflow and public-repo safety rules.
