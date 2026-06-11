@@ -605,6 +605,45 @@ describe("doctor/readiness", () => {
     });
   });
 
+  it("reports Hermes OAuth registration compatibility errors before generic auth guidance", () => {
+    const deps = createDeps();
+    installHermes(deps);
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v hermes
+      { status: 1 }, // command -v tirith
+      { status: 0, stdout: "hermes-dashboard\n" },
+      { status: 0, stdout: "Hermes Agent v0.14.0\nProject: /opt/hermes\n" },
+      {
+        status: 0,
+        stdout:
+          "Name Transport Tools Status\nvx https://api.onememory.co/mcp all ✓ enabled\n",
+      },
+      {
+        status: 0,
+        stdout: [
+          "Testing 'vx'...",
+          "Transport: HTTP → https://api.onememory.co/mcp",
+          "Auth: OAuth 2.1 PKCE",
+          "✗ Connection failed: Invalid registration response: 3 validation errors for OAuthClientInformationFull",
+          "logo_uri",
+          "tos_uri",
+          "policy_uri",
+        ].join("\n"),
+      },
+    );
+
+    expect(getClientReadiness("hermes", deps)).toMatchObject({
+      label: "Hermes Agent",
+      status: "runtime-error",
+      notes: expect.arrayContaining([
+        expect.stringContaining("registration response is invalid"),
+        expect.stringContaining("logo_uri, tos_uri, policy_uri"),
+        expect.stringContaining("Deploy the VX OAuth registration compatibility fix"),
+      ]),
+    });
+  });
+
   it("reports Claude Code ready when `claude mcp list` says VX is connected", () => {
     const deps = createDeps();
     mkdirSync(join(deps.homedir(), ".claude", "commands"), { recursive: true });
