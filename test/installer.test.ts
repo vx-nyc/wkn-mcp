@@ -393,11 +393,57 @@ describe("installOpenClaw", () => {
     mockSpawn(
       deps,
       { status: 1 }, // command -v openclaw
-      { status: 1 }, // command -v npx
     );
     const notes = installOpenClaw(deps);
     expect(notes.join("\n")).toContain("openclaw plugins install @vx-nyc/vx-mcp");
     expect(notes.join("\n")).toContain(VX_URL);
+  });
+
+  it("does not run OpenClaw through npx without an existing OpenClaw config signal", () => {
+    const deps = createDeps();
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v openclaw
+    );
+
+    const notes = installOpenClaw(deps);
+    expect(vi.mocked(deps.spawnSync)).toHaveBeenCalledTimes(1);
+    expect(notes.join("\n")).toContain("openclaw plugins install @vx-nyc/vx-mcp");
+    expect(notes.join("\n")).not.toContain("Configured OpenClaw VX MCP through npx");
+  });
+
+  it("uses npx OpenClaw to write the hosted OAuth MCP config when the global CLI is missing", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(join(deps.homedir(), ".openclaw-dev", "openclaw.json"), "{}\n", "utf8");
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v openclaw
+      { status: 0, stdout: "/usr/bin/npx\n" }, // command -v npx
+      { status: 0, stdout: "Saved MCP server vx\n" },
+    );
+
+    const notes = installOpenClaw(deps);
+    expect(vi.mocked(deps.spawnSync).mock.calls[2]?.[1]).toEqual([
+      "-y",
+      "openclaw",
+      "--dev",
+      "mcp",
+      "add",
+      "vx",
+      "--url",
+      VX_URL,
+      "--transport",
+      "streamable-http",
+      "--auth",
+      "oauth",
+      "--include",
+      "vx_librarian_seed,vx_librarian_context,vx_reality,vx_recall,vx_store",
+      "--no-probe",
+    ]);
+    expect(notes.join("\n")).toContain("Configured OpenClaw VX MCP through npx");
+    expect(notes.join("\n")).toContain("npx openclaw --dev mcp login vx");
+    expect(notes.join("\n")).not.toContain("Add this to your OpenClaw plugin config");
   });
 
   it("runs `openclaw plugins install` when the CLI is available", () => {
@@ -708,6 +754,68 @@ describe("doctor/readiness", () => {
       "vx",
       "--json",
     ]);
+  });
+
+  it("reports OpenClaw OAuth login as the next step when the hosted MCP server requires authorization", () => {
+    const deps = createDeps();
+    const configPath = join(deps.homedir(), ".openclaw-dev", "openclaw.json");
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          mcp: {
+            servers: {
+              vx: {
+                url: "https://api.onememory.co/mcp",
+                transport: "streamable-http",
+                auth: "oauth",
+                toolFilter: {
+                  include: [
+                    "vx_librarian_seed",
+                    "vx_librarian_context",
+                    "vx_reality",
+                    "vx_recall",
+                    "vx_store",
+                  ],
+                },
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v openclaw
+      { status: 0, stdout: "/usr/bin/npx\n" }, // command -v npx
+      {
+        status: 0,
+        stdout: JSON.stringify({
+          generatedAt: "2026-06-11T00:21:20.568Z",
+          servers: {},
+          tools: [],
+          diagnostics: [
+            {
+              serverName: "vx",
+              message: 'Error: MCP server "vx" requires OAuth authorization. Run openclaw mcp login vx.',
+            },
+          ],
+        }),
+      },
+    );
+
+    expect(getClientReadiness("openclaw", deps)).toMatchObject({
+      label: "OpenClaw",
+      status: "manual-approval",
+      notes: expect.arrayContaining([
+        expect.stringContaining("OAuth is not complete"),
+        expect.stringContaining("npx openclaw --dev mcp login vx"),
+      ]),
+    });
   });
 
   it("treats local Ollama marker auth as ready for OpenClaw live turns", () => {

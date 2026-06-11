@@ -150,6 +150,52 @@ function openClawProfileArgs(configPath: string, deps: InstallerDeps): string[] 
   return match?.[1] ? ["--profile", match[1]] : [];
 }
 
+function openClawCommand(args: string[]): string {
+  return ["npx", "openclaw", ...args].join(" ");
+}
+
+function hasOpenClawInstallSignal(deps: InstallerDeps): boolean {
+  if (deps.env.VX_MCP_OPENCLAW_CONFIG_PATH) return true;
+  if (deps.env.VX_MCP_OPENCLAW_PROFILE || deps.env.OPENCLAW_PROFILE) return true;
+  return (
+    deps.existsSync(join(deps.homedir(), ".openclaw-dev", "openclaw.json")) ||
+    deps.existsSync(join(deps.homedir(), ".openclaw", "openclaw.json"))
+  );
+}
+
+function openClawInstallProfileArgs(deps: InstallerDeps): string[] {
+  const explicit = deps.env.VX_MCP_OPENCLAW_CONFIG_PATH;
+  if (explicit) return openClawProfileArgs(explicit, deps);
+  const profile = deps.env.VX_MCP_OPENCLAW_PROFILE || deps.env.OPENCLAW_PROFILE;
+  if (profile) return ["--profile", profile];
+  const devConfigPath = join(deps.homedir(), ".openclaw-dev", "openclaw.json");
+  const defaultConfigPath = join(deps.homedir(), ".openclaw", "openclaw.json");
+  if (deps.existsSync(devConfigPath) && !deps.existsSync(defaultConfigPath)) return ["--dev"];
+  return [];
+}
+
+function openClawMcpAddArgs(profileArgs: string[] = []): string[] {
+  return [
+    ...profileArgs,
+    "mcp",
+    "add",
+    VX_MCP_SERVER_NAME,
+    "--url",
+    VX_MCP_URL,
+    "--transport",
+    "streamable-http",
+    "--auth",
+    "oauth",
+    "--include",
+    RECOMMENDED_OPENCLAW_VX_TOOLS.join(","),
+    "--no-probe",
+  ];
+}
+
+function openClawOAuthRequired(output: string): boolean {
+  return /requires OAuth authorization|mcp login|OAuth is not complete|needs authentication/i.test(output);
+}
+
 function openClawProbeReadiness(
   config: { path: string; url: string; missingRequiredTools: string[] },
   deps: InstallerDeps,
@@ -167,6 +213,17 @@ function openClawProbeReadiness(
     },
   );
   const probeOutput = `${probe.stdout ?? ""}\n${probe.stderr ?? ""}`.trim();
+  if (openClawOAuthRequired(probeOutput)) {
+    return {
+      status: "manual-approval",
+      notes: [
+        `OpenClaw MCP config includes VX at ${config.path}.`,
+        `VX endpoint: ${config.url}`,
+        "OpenClaw can reach the VX MCP server, but OAuth is not complete yet.",
+        `Run \`${openClawCommand([...profileArgs, "mcp", "login", VX_MCP_SERVER_NAME])}\` and approve the browser sign-in.`,
+      ],
+    };
+  }
   if (probe.status !== 0) {
     return {
       status: "manual-approval",
@@ -975,6 +1032,38 @@ export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
 
   const openclawCli = findCli("openclaw", deps);
   if (!openclawCli) {
+    if (hasOpenClawInstallSignal(deps)) {
+      const npxCli = findCli("npx", deps);
+      if (!npxCli) {
+        notes.push(
+          "OpenClaw config was found, but `npx` was not found on PATH for automatic setup.",
+        );
+      } else {
+        const profileArgs = openClawInstallProfileArgs(deps);
+        const addArgs = ["-y", "openclaw", ...openClawMcpAddArgs(profileArgs)];
+        const addResult = deps.spawnSync(npxCli, addArgs, { encoding: "utf8" });
+        if (addResult.status === 0) {
+          notes.push(
+            `Configured OpenClaw VX MCP through npx: \`${openClawCommand(openClawMcpAddArgs(profileArgs))}\``,
+          );
+          notes.push(
+            `Exposed the core VX MCP tools for OpenClaw: ${RECOMMENDED_OPENCLAW_VX_TOOLS.join(", ")}`,
+          );
+          notes.push(
+            `Run \`${openClawCommand([...profileArgs, "mcp", "login", VX_MCP_SERVER_NAME])}\` to authorize VX with OAuth.`,
+          );
+          return notes;
+        }
+        notes.push(
+          `npx can run OpenClaw, but automatic MCP configuration failed: ${
+            addResult.stderr?.trim() || addResult.stdout?.trim() || "unknown error"
+          }`,
+        );
+        notes.push(
+          `Retry manually: ${openClawCommand(openClawMcpAddArgs(profileArgs))}`,
+        );
+      }
+    }
     notes.push(
       `OpenClaw CLI (\`openclaw\`) was not found on PATH. Install OpenClaw, then run:`,
     );
