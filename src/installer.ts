@@ -1596,9 +1596,10 @@ export function doctor(deps: InstallerDeps = defaultDeps): string[] {
   lines.push("");
   lines.push("First agent check:");
   lines.push("  1. During OAuth consent, choose the Knowledge Contexts this agent may use.");
-  lines.push("  2. If the vx-librarian context is empty, call vx_librarian_seed once.");
-  lines.push("  3. Call vx_librarian_context to load VX purpose and memory policy from VX memory.");
-  lines.push("  4. Call vx_reality with the context the agent should use.");
+  lines.push("  2. For OpenClaw, run vx-mcp smoke openclaw after consent to verify tools and model readiness.");
+  lines.push("  3. If the vx-librarian context is empty, call vx_librarian_seed once.");
+  lines.push("  4. Call vx_librarian_context to load VX purpose and memory policy from VX memory.");
+  lines.push("  5. Call vx_reality with the context the agent should use.");
   lines.push("  Do not copy VX policy into local prompts; keep agent reality in VX contexts.");
   return lines;
 }
