@@ -450,13 +450,26 @@ function hermesDockerReadiness(deps: InstallerDeps): Pick<ClientReadiness, "stat
 
   const test = deps.spawnSync(
     "docker",
-    ["exec", containerName, "sh", "-lc", `timeout 8 ${hermesBin} mcp test vx 2>&1`],
+    ["exec", containerName, "sh", "-lc", `timeout 15 ${hermesBin} mcp test vx 2>&1`],
     {
       encoding: "utf8",
-      timeout: 10000,
+      timeout: 20000,
     },
   );
   const testOutput = `${test?.stdout ?? ""}\n${test?.stderr ?? ""}`.trim();
+  if (/Invalid registration response/i.test(testOutput)) {
+    const invalidFields = ["logo_uri", "tos_uri", "policy_uri"]
+      .filter((field) => testOutput.includes(field))
+      .join(", ");
+    return {
+      status: "runtime-error",
+      notes: [
+        ...notes,
+        `Hermes Docker reached VX OAuth registration, but the registration response is invalid${invalidFields ? ` for: ${invalidFields}` : ""}.`,
+        "Deploy the VX OAuth registration compatibility fix, then rerun `hermes mcp login vx`.",
+      ],
+    };
+  }
   if (/401|Unauthorized|needs authentication|auth/i.test(testOutput)) {
     const authSummary = /401\s+Unauthorized/i.test(testOutput)
       ? "401 Unauthorized"
