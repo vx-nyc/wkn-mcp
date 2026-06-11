@@ -859,7 +859,7 @@ describe("doctor/readiness", () => {
       status: "manual-approval",
       notes: expect.arrayContaining([
         expect.stringContaining("OAuth is not complete"),
-        expect.stringContaining("npx openclaw --dev mcp login vx"),
+        expect.stringContaining("vx-mcp login openclaw"),
       ]),
     });
   });

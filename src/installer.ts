@@ -221,7 +221,7 @@ function openClawProbeReadiness(
         `OpenClaw MCP config includes VX at ${config.path}.`,
         `VX endpoint: ${config.url}`,
         "OpenClaw can reach the VX MCP server, but OAuth is not complete yet.",
-        `Run \`${openClawCommand([...profileArgs, "mcp", "login", VX_MCP_SERVER_NAME])}\` and approve the browser sign-in.`,
+        "Run `vx-mcp login openclaw` and approve the browser sign-in.",
       ],
     };
   }
