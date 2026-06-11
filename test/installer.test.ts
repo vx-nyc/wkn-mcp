@@ -1034,6 +1034,7 @@ describe("doctor/readiness", () => {
     expect(lines).toContain("ChatGPT: manual");
     expect(lines).toContain("vx-mcp install cursor");
     expect(lines).toContain("vx-mcp install hermes");
+    expect(lines).toContain("During OAuth consent, choose the Knowledge Contexts");
     expect(lines).toContain("vx_librarian_seed");
     expect(lines).toContain("vx_librarian_context");
     expect(lines).toContain("vx_reality");
@@ -1104,6 +1105,7 @@ describe("handleCli", () => {
     const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
     expect(output).toContain("VX MCP readiness");
     expect(output).toContain("ChatGPT");
+    expect(output).toContain("During OAuth consent, choose the Knowledge Contexts");
     expect(output).toContain("vx_librarian_seed");
     expect(output).toContain("vx_librarian_context");
   });
