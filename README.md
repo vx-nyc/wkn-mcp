@@ -123,7 +123,18 @@ Otherwise it prints the snippet for manual install:
 }
 ```
 
-OpenClaw handles the OAuth flow when it first connects to the MCP endpoint.
+OpenClaw handles the OAuth flow when it first connects to the MCP endpoint. To
+start that sign-in explicitly after install, run:
+
+```bash
+npx @vx-nyc/vx-mcp login openclaw
+```
+
+To start every supported CLI login helper in one pass:
+
+```bash
+npx @vx-nyc/vx-mcp login all
+```
 
 ### Hermes Agent
 

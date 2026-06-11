@@ -221,7 +221,7 @@ function openClawProbeReadiness(
         `OpenClaw MCP config includes VX at ${config.path}.`,
         `VX endpoint: ${config.url}`,
         "OpenClaw can reach the VX MCP server, but OAuth is not complete yet.",
-        `Run \`${openClawCommand([...profileArgs, "mcp", "login", VX_MCP_SERVER_NAME])}\` and approve the browser sign-in.`,
+        "Run `vx-mcp login openclaw` and approve the browser sign-in.",
       ],
     };
   }
@@ -1020,6 +1020,52 @@ function loginHermesSucceeded(notes: string[]): boolean {
   return notes.some((note) => note.includes("OAuth completed"));
 }
 
+export function loginOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
+  const notes: string[] = [];
+  const config = openClawVxConfig(deps);
+  if (!config) {
+    notes.push("OpenClaw VX MCP config was not found. Run `vx-mcp install openclaw` first.");
+    return notes;
+  }
+
+  notes.push(`OpenClaw MCP config includes VX at ${config.path}.`);
+  if (config.missingRequiredTools.length > 0) {
+    notes.push(openClawToolFilterFixNote(config.missingRequiredTools));
+  }
+
+  const profileArgs = openClawProfileArgs(config.path, deps);
+  const openclawCli = findCli("openclaw", deps);
+  const npxCli = openclawCli ? null : findCli("npx", deps);
+  if (!openclawCli && !npxCli) {
+    notes.push(
+      `Neither OpenClaw CLI nor npx was found. Run manually once available: ${openClawCommand([...profileArgs, "mcp", "login", VX_MCP_SERVER_NAME])}`,
+    );
+    return notes;
+  }
+
+  const command = openclawCli || npxCli!;
+  const args = openclawCli
+    ? [...profileArgs, "mcp", "login", VX_MCP_SERVER_NAME]
+    : ["-y", "openclaw", ...profileArgs, "mcp", "login", VX_MCP_SERVER_NAME];
+  const result = deps.spawnSync(command, args, {
+    stdio: "inherit",
+    encoding: "utf8",
+  });
+
+  if (result.status === 0) {
+    notes.push("OpenClaw OAuth completed.");
+  } else {
+    notes.push(
+      `OpenClaw OAuth login exited with status ${result.status ?? "unknown"}. Approve the browser sign-in, then rerun vx-mcp doctor.`,
+    );
+  }
+  return notes;
+}
+
+function loginOpenClawSucceeded(notes: string[]): boolean {
+  return notes.some((note) => note.includes("OAuth completed"));
+}
+
 export function uninstallHermes(deps: InstallerDeps = defaultDeps): string[] {
   const notes: string[] = [];
   const home = hermesHome(deps);
@@ -1521,7 +1567,7 @@ const USAGE = [
   `Commands:`,
   `  install <all|claude|cursor|codex|openclaw|hermes>  Wire up clients to ${VX_MCP_URL}`,
   `  uninstall <claude|cursor|codex|openclaw|hermes>    Remove the VX MCP entry`,
-  `  login hermes                              Authorize Hermes Docker with a host-reachable OAuth callback`,
+  `  login <openclaw|hermes|all>               Authorize OAuth MCP clients that support CLI login`,
   `  doctor                                    Report local VX MCP readiness`,
   `  clients                                   List supported clients`,
   `  --version, -v                             Print package version`,
@@ -1581,20 +1627,54 @@ export async function handleCli(
   }
 
   if (command === "login") {
-    if (target !== "hermes") {
-      console.error("Unknown login target. Supported: hermes.");
+    if (target === "openclaw") {
+      const notes = loginOpenClaw(deps);
+      console.log("Started VX MCP login for OpenClaw.");
+      for (const note of notes) {
+        console.log(`- ${note}`);
+      }
+      if (!loginOpenClawSucceeded(notes)) {
+        process.exitCode = 1;
+      }
+      return true;
+    }
+
+    if (target === "hermes") {
+      const notes = loginHermes(deps);
+      console.log("Started VX MCP login for Hermes.");
+      for (const note of notes) {
+        console.log(`- ${note}`);
+      }
+      if (!loginHermesSucceeded(notes)) {
+        process.exitCode = 1;
+      }
+      return true;
+    }
+
+    if (target === "all") {
+      const openClawNotes = loginOpenClaw(deps);
+      console.log("Started VX MCP login for OpenClaw.");
+      for (const note of openClawNotes) {
+        console.log(`- ${note}`);
+      }
+
+      const hermesNotes = loginHermes(deps);
+      console.log("Started VX MCP login for Hermes.");
+      for (const note of hermesNotes) {
+        console.log(`- ${note}`);
+      }
+
+      if (!loginOpenClawSucceeded(openClawNotes) || !loginHermesSucceeded(hermesNotes)) {
+        process.exitCode = 1;
+      }
+      return true;
+    }
+
+    {
+      console.error("Unknown login target. Supported: openclaw, hermes, all.");
       printHelp();
       return true;
     }
-    const notes = loginHermes(deps);
-    console.log("Started VX MCP login for Hermes.");
-    for (const note of notes) {
-      console.log(`- ${note}`);
-    }
-    if (!loginHermesSucceeded(notes)) {
-      process.exitCode = 1;
-    }
-    return true;
   }
 
   if (command === "install" || command === "uninstall") {

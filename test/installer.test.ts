@@ -859,7 +859,7 @@ describe("doctor/readiness", () => {
       status: "manual-approval",
       notes: expect.arrayContaining([
         expect.stringContaining("OAuth is not complete"),
-        expect.stringContaining("npx openclaw --dev mcp login vx"),
+        expect.stringContaining("vx-mcp login openclaw"),
       ]),
     });
   });
@@ -1143,6 +1143,73 @@ describe("handleCli", () => {
     expect(output).toContain("exited with status 1");
     expect(process.exitCode).toBe(1);
     process.exitCode = undefined;
+  });
+
+  it("dispatches OpenClaw OAuth login through npx when a dev config exists", async () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      join(deps.homedir(), ".openclaw-dev", "openclaw.json"),
+      JSON.stringify({
+        mcp: {
+          servers: {
+            vx: {
+              url: VX_URL,
+              transport: "streamable-http",
+              auth: "oauth",
+            },
+          },
+        },
+      }),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // openclaw CLI lookup
+      { status: 0, stdout: "/usr/bin/npx\n" },
+      { status: 0, stdout: "Authenticated\n" },
+    );
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await handleCli(["login", "openclaw"], deps);
+
+    const spawn = vi.mocked(deps.spawnSync);
+    expect(spawn.mock.calls[2]?.[0]).toBe("/usr/bin/npx");
+    expect(spawn.mock.calls[2]?.[1]).toEqual([
+      "-y",
+      "openclaw",
+      "--dev",
+      "mcp",
+      "login",
+      "vx",
+    ]);
+    expect(log.mock.calls.map((c) => c.join(" ")).join("\n")).toContain(
+      "Started VX MCP login for OpenClaw",
+    );
+  });
+
+  it("dispatches login all for OpenClaw and Hermes", async () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      join(deps.homedir(), ".openclaw-dev", "openclaw.json"),
+      JSON.stringify({ mcp: { servers: { vx: { url: VX_URL } } } }),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // openclaw CLI lookup
+      { status: 0, stdout: "/usr/bin/npx\n" },
+      { status: 0, stdout: "Authenticated\n" },
+      { status: 0 }, // Hermes Docker helper
+    );
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await handleCli(["login", "all"], deps);
+
+    const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(output).toContain("Started VX MCP login for OpenClaw");
+    expect(output).toContain("Started VX MCP login for Hermes");
   });
 });
 
