@@ -290,6 +290,8 @@ describe("Hermes config helpers", () => {
     expect(block).toContain("  vx:");
     expect(block).toContain(`    url: "${VX_URL}"`);
     expect(block).toContain("    auth: oauth");
+    expect(block).toContain("    oauth:");
+    expect(block).toContain("      redirect_port: 8989");
     expect(block).toContain("headers:");
     expect(block).toContain('X-Counterparty-Id: "hermes:agent"');
     expect(block).toContain('X-Counterparty-Kind: "personal-agent"');
@@ -350,8 +352,10 @@ describe("installHermes", () => {
     expect(config).toContain("  vx:");
     expect(config).toContain(`url: "${VX_URL}"`);
     expect(config).toContain("auth: oauth");
+    expect(config).toContain("redirect_port: 8989");
     expect(config).toContain('X-Counterparty-Client: "hermes"');
     expect(notes.join("\n")).toContain("Restart Hermes Agent");
+    expect(notes.join("\n")).toContain("vx-mcp login hermes");
   });
 
   it("is idempotent across repeat installs", () => {
@@ -600,6 +604,7 @@ describe("doctor/readiness", () => {
         expect.stringContaining("MCP config lists the hosted VX endpoint"),
         expect.stringContaining("OAuth is not complete"),
         expect.stringContaining("401 Unauthorized"),
+        expect.stringContaining("vx-mcp login hermes"),
         expect.stringContaining("Host Hermes executable is not usable"),
       ]),
     });
@@ -1101,6 +1106,26 @@ describe("handleCli", () => {
     expect(output).toContain("ChatGPT");
     expect(output).toContain("vx_librarian_seed");
     expect(output).toContain("vx_librarian_context");
+  });
+
+  it("dispatches Hermes Docker login helper", async () => {
+    const deps = createDeps();
+    mockSpawn(deps, { status: 0 });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await handleCli(["login", "hermes"], deps);
+
+    const config = readFileSync(join(deps.homedir(), ".hermes", "config.yaml"), "utf8");
+    const spawn = vi.mocked(deps.spawnSync);
+    const [command, args] = spawn.mock.calls[0];
+    const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
+
+    expect(command).toBe("docker");
+    expect(args).toContain("run");
+    expect(args).toContain("127.0.0.1:8989:8990");
+    expect(args).toContain("nousresearch/hermes-agent");
+    expect(config).toContain("redirect_port: 8989");
+    expect(output).toContain("Started VX MCP login for Hermes");
   });
 });
 

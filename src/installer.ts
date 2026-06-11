@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  HERMES_OAUTH_REDIRECT_PORT,
   VX_MCP_SERVER_NAME,
   VX_MCP_URL,
   VX_PACKAGE_NAME,
@@ -479,7 +480,7 @@ function hermesDockerReadiness(deps: InstallerDeps): Pick<ClientReadiness, "stat
       notes: [
         ...notes,
         `Hermes Docker can reach VX MCP, but OAuth is not complete: ${authSummary}.`,
-        "Run `hermes mcp login vx` inside the Hermes container or trigger a VX tool call and approve sign-in.",
+        `Run \`vx-mcp login hermes\` from the host so the OAuth callback on 127.0.0.1:${HERMES_OAUTH_REDIRECT_PORT} can reach Hermes Docker, then approve sign-in in the browser.`,
       ],
     };
   }
@@ -495,7 +496,7 @@ function hermesDockerReadiness(deps: InstallerDeps): Pick<ClientReadiness, "stat
     notes: [
       ...notes,
       `Hermes Docker VX MCP connection still needs verification: ${firstLine(testOutput) || `exit ${test?.status ?? "unknown"}`}.`,
-      "Trigger a VX tool call in Hermes and approve OAuth if prompted, then rerun vx-mcp doctor.",
+      `If OAuth is pending, run \`vx-mcp login hermes\` from the host and approve VX in the browser, then rerun vx-mcp doctor.`,
     ],
   };
 }
@@ -853,6 +854,8 @@ export function buildHermesManagedBlock(
     `  ${serverName}:`,
     `    url: "${url.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`,
     "    auth: oauth",
+    "    oauth:",
+    `      redirect_port: ${HERMES_OAUTH_REDIRECT_PORT}`,
     "    headers:",
     '      X-Counterparty-Id: "hermes:agent"',
     '      X-Counterparty-Kind: "personal-agent"',
@@ -911,6 +914,90 @@ export function installHermes(deps: InstallerDeps = defaultDeps): string[] {
   notes.push(
     "Restart Hermes Agent; it will discover VX MCP tools on startup and open your browser to sign in via OAuth on first VX tool use.",
   );
+  notes.push(
+    `If Hermes runs in Docker, use \`vx-mcp login hermes\` so the OAuth callback on 127.0.0.1:${HERMES_OAUTH_REDIRECT_PORT} can reach the container.`,
+  );
+  return notes;
+}
+
+function hermesDockerOAuthLoginShell(): string {
+  return [
+    "python3 - <<'PY' &",
+    "import socket, threading, time",
+    "LISTEN = ('0.0.0.0', 8990)",
+    `TARGET = ('127.0.0.1', ${HERMES_OAUTH_REDIRECT_PORT})`,
+    "def pipe(src, dst):",
+    "    try:",
+    "        while True:",
+    "            data = src.recv(65536)",
+    "            if not data:",
+    "                break",
+    "            dst.sendall(data)",
+    "    except Exception:",
+    "        pass",
+    "    finally:",
+    "        for sock in (src, dst):",
+    "            try:",
+    "                sock.close()",
+    "            except Exception:",
+    "                pass",
+    "server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)",
+    "server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)",
+    "server.bind(LISTEN)",
+    "server.listen(50)",
+    "while True:",
+    "    client, _ = server.accept()",
+    "    target = None",
+    "    for _ in range(200):",
+    "        try:",
+    "            target = socket.create_connection(TARGET, timeout=0.25)",
+    "            break",
+    "        except OSError:",
+    "            time.sleep(0.05)",
+    "    if target is None:",
+    "        client.close()",
+    "        continue",
+    "    threading.Thread(target=pipe, args=(client, target), daemon=True).start()",
+    "    threading.Thread(target=pipe, args=(target, client), daemon=True).start()",
+    "PY",
+    "exec /opt/hermes/.venv/bin/hermes mcp login vx",
+  ].join("\n");
+}
+
+export function loginHermes(deps: InstallerDeps = defaultDeps): string[] {
+  const notes = installHermes(deps);
+  const home = hermesHome(deps);
+  const result = deps.spawnSync(
+    "docker",
+    [
+      "run",
+      "--rm",
+      "-i",
+      "-p",
+      `127.0.0.1:${HERMES_OAUTH_REDIRECT_PORT}:8990`,
+      "-v",
+      `${home}:/opt/data`,
+      "-e",
+      "HERMES_HOME=/opt/data",
+      "--entrypoint",
+      "sh",
+      "nousresearch/hermes-agent",
+      "-lc",
+      hermesDockerOAuthLoginShell(),
+    ],
+    {
+      stdio: "inherit",
+      encoding: "utf8",
+    },
+  );
+
+  if (result.status === 0) {
+    notes.push("Hermes OAuth completed through the Docker login helper.");
+  } else {
+    notes.push(
+      `Hermes Docker OAuth helper exited with status ${result.status ?? "unknown"}. Open the printed URL quickly and approve VX before Hermes' login timeout.`,
+    );
+  }
   return notes;
 }
 
@@ -1415,6 +1502,7 @@ const USAGE = [
   `Commands:`,
   `  install <all|claude|cursor|codex|openclaw|hermes>  Wire up clients to ${VX_MCP_URL}`,
   `  uninstall <claude|cursor|codex|openclaw|hermes>    Remove the VX MCP entry`,
+  `  login hermes                              Authorize Hermes Docker with a host-reachable OAuth callback`,
   `  doctor                                    Report local VX MCP readiness`,
   `  clients                                   List supported clients`,
   `  --version, -v                             Print package version`,
@@ -1469,6 +1557,20 @@ export async function handleCli(
   if (command === "doctor" || command === "readiness") {
     for (const line of doctor(deps)) {
       console.log(line);
+    }
+    return true;
+  }
+
+  if (command === "login") {
+    if (target !== "hermes") {
+      console.error("Unknown login target. Supported: hermes.");
+      printHelp();
+      return true;
+    }
+    const notes = loginHermes(deps);
+    console.log("Started VX MCP login for Hermes.");
+    for (const note of notes) {
+      console.log(`- ${note}`);
     }
     return true;
   }
