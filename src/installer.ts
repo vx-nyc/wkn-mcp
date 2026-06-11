@@ -1159,6 +1159,19 @@ function hermesNativeSmokeReadiness(
     timeout: 20000,
   });
   const testOutput = `${test.stdout ?? ""}\n${test.stderr ?? ""}`.trim();
+  if (/Invalid registration response/i.test(testOutput)) {
+    const invalidFields = ["logo_uri", "tos_uri", "policy_uri"]
+      .filter((field) => testOutput.includes(field))
+      .join(", ");
+    return {
+      status: "runtime-error",
+      notes: [
+        ...notes,
+        `Hermes reached VX OAuth registration, but the registration response is invalid${invalidFields ? ` for: ${invalidFields}` : ""}.`,
+        "Update VX MCP compatibility or Hermes runtime support, then rerun `hermes mcp login vx`.",
+      ],
+    };
+  }
   if (/401|Unauthorized|needs authentication|auth/i.test(testOutput)) {
     const authSummary = /401\s+Unauthorized/i.test(testOutput)
       ? "401 Unauthorized"
