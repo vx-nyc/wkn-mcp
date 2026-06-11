@@ -1469,6 +1469,22 @@ describe("handleCli", () => {
     expect(notes.join("\n")).toContain("Hermes VX smoke ready");
   });
 
+  it("supports Hermes Docker smoke without a host Hermes config", () => {
+    const deps = createDeps();
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "hermes-dashboard\n" },
+      { status: 0, stdout: "Hermes Agent v0.14.0" },
+      { status: 0, stdout: `vx ${VX_URL}` },
+      { status: 0, stdout: "✓ connected" },
+    );
+
+    const notes = smokeHermes(deps);
+
+    expect(notes.join("\n")).toContain("Hermes Docker MCP config lists the hosted VX endpoint");
+    expect(notes.join("\n")).toContain("Hermes VX smoke ready");
+  });
+
   it("dispatches Hermes smoke from the CLI", async () => {
     const deps = createDeps();
     const log = vi.spyOn(console, "log").mockImplementation(() => {});

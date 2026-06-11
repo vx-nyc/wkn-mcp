@@ -1206,6 +1206,8 @@ function hermesSmokeReadiness(deps: InstallerDeps): Pick<ClientReadiness, "statu
   const configPath = hermesConfigPath(deps);
   const content = deps.existsSync(configPath) ? readText(configPath, deps) : "";
   if (!content.includes("mcp_servers:") || !content.includes(`${VX_MCP_SERVER_NAME}:`) || !hasHostedUrl(content)) {
+    const docker = hermesDockerReadiness(deps);
+    if (docker) return docker;
     return getClientReadiness("hermes", deps);
   }
 
