@@ -18,6 +18,7 @@ import {
   removeCursorVxEntry,
   stripHermesManagedBlock,
   stripCodexManagedBlock,
+  smokeHermes,
   smokeOpenClaw,
   uninstallHermes,
   uninstallClaude,
@@ -1336,6 +1337,57 @@ describe("handleCli", () => {
     expect(notes.join("\n")).toContain("Live proof command:");
     expect(notes.join("\n")).toContain("vx_librarian_context");
     expect(notes.join("\n")).toContain("vx_store");
+  });
+
+  it("reports Hermes smoke not ready when install is missing", () => {
+    const deps = createDeps();
+
+    const notes = smokeHermes(deps);
+
+    expect(notes.join("\n")).toContain("Run: vx-mcp install hermes");
+    expect(notes.join("\n")).toContain("Hermes VX smoke is not ready yet");
+  });
+
+  it("prints a live proof prompt when Hermes smoke is ready", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".hermes", "bin"), { recursive: true });
+    writeFileSync(join(deps.homedir(), ".hermes", "bin", "tirith"), "", "utf8");
+    writeFileSync(
+      join(deps.homedir(), ".hermes", "config.yaml"),
+      [
+        "mcp_servers:",
+        "  vx:",
+        `    url: ${VX_URL}`,
+        "    transport: http",
+      ].join("\n"),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // hermes CLI lookup
+      { status: 1 }, // tirith CLI lookup
+      { status: 0, stdout: "Hermes Agent v0.14.0" },
+    );
+
+    const notes = smokeHermes(deps);
+
+    expect(notes.join("\n")).toContain("Hermes VX smoke ready");
+    expect(notes.join("\n")).toContain("Live proof prompt:");
+    expect(notes.join("\n")).toContain("vx_librarian_context");
+  });
+
+  it("dispatches Hermes smoke from the CLI", async () => {
+    const deps = createDeps();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    process.exitCode = undefined;
+
+    await handleCli(["smoke", "hermes"], deps);
+
+    const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(output).toContain("VX MCP smoke for Hermes");
+    expect(output).toContain("Hermes VX smoke is not ready yet");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
   });
 
   it("dispatches login all for OpenClaw and Hermes", async () => {

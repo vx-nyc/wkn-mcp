@@ -201,6 +201,16 @@ Linux/ELF `tirith` binary on macOS, the doctor will report the incompatible
 executable and ask for a macOS-compatible Hermes build before VX can verify a
 live Hermes workflow.
 
+After approving VX, run the Hermes smoke check:
+
+```bash
+npx @vx-nyc/vx-mcp smoke hermes
+```
+
+When Hermes is ready, the smoke check prints a live proof prompt that asks
+Hermes to load `vx_librarian_context`, store a memory, recall it, and answer
+from the retrieved context.
+
 ### ChatGPT
 
 ChatGPT connects to remote MCP servers through ChatGPT Apps / developer mode,
@@ -300,7 +310,7 @@ tools. See your client's tool list after installation.
 vx-mcp install <all|claude|cursor|codex|openclaw|hermes>
 vx-mcp uninstall <claude|cursor|codex|openclaw|hermes>
 vx-mcp login <openclaw|hermes|all>
-vx-mcp smoke <openclaw>
+vx-mcp smoke <openclaw|hermes>
 vx-mcp doctor
 vx-mcp clients
 vx-mcp --version

@@ -1133,6 +1133,31 @@ function smokeOpenClawSucceeded(notes: string[]): boolean {
   return notes.some((note) => note.includes("OpenClaw VX smoke ready"));
 }
 
+export function smokeHermes(deps: InstallerDeps = defaultDeps): string[] {
+  const readiness = getClientReadiness("hermes", deps);
+  const notes = [...readiness.notes];
+  if (readiness.status !== "ready") {
+    notes.push(
+      "Hermes VX smoke is not ready yet. Complete the install/OAuth/runtime step above, then rerun `vx-mcp smoke hermes`.",
+    );
+    return notes;
+  }
+
+  notes.push("Hermes VX smoke ready: MCP config and runtime checks are available.");
+  notes.push(
+    [
+      "Live proof prompt:",
+      "Use VX MCP tools. First call vx_librarian_context, then save this memory in VX:",
+      "VX Hermes live smoke can write and recall shared context. Then recall VX Hermes live smoke and answer with the retrieved memory.",
+    ].join(" "),
+  );
+  return notes;
+}
+
+function smokeHermesSucceeded(notes: string[]): boolean {
+  return notes.some((note) => note.includes("Hermes VX smoke ready"));
+}
+
 export function uninstallHermes(deps: InstallerDeps = defaultDeps): string[] {
   const notes: string[] = [];
   const home = hermesHome(deps);
@@ -1637,7 +1662,7 @@ const USAGE = [
   `  install <all|claude|cursor|codex|openclaw|hermes>  Wire up clients to ${VX_MCP_URL}`,
   `  uninstall <claude|cursor|codex|openclaw|hermes>    Remove the VX MCP entry`,
   `  login <openclaw|hermes|all>               Authorize OAuth MCP clients that support CLI login`,
-  `  smoke <openclaw>                          Verify MCP OAuth/tools/model readiness before a live agent turn`,
+  `  smoke <openclaw|hermes>                   Verify MCP OAuth/tools/model readiness before a live agent turn`,
   `  doctor                                    Report local VX MCP readiness`,
   `  clients                                   List supported clients`,
   `  --version, -v                             Print package version`,
@@ -1760,8 +1785,20 @@ export async function handleCli(
       return true;
     }
 
+    if (target === "hermes") {
+      const notes = smokeHermes(deps);
+      console.log("VX MCP smoke for Hermes.");
+      for (const note of notes) {
+        console.log(`- ${note}`);
+      }
+      if (!smokeHermesSucceeded(notes)) {
+        process.exitCode = 1;
+      }
+      return true;
+    }
+
     {
-      console.error("Unknown smoke target. Supported: openclaw.");
+      console.error("Unknown smoke target. Supported: openclaw, hermes.");
       printHelp();
       return true;
     }
