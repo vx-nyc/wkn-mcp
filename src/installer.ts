@@ -197,6 +197,11 @@ function openClawOAuthRequired(output: string): boolean {
   return /requires OAuth authorization|mcp login|OAuth is not complete|needs authentication/i.test(output);
 }
 
+function openClawOAuthCompletionNote(configPath: string, deps: InstallerDeps): string {
+  const profileArgs = openClawProfileArgs(configPath, deps);
+  return `If OpenClaw prints an authorization code step, complete it with: ${openClawCommand([...profileArgs, "mcp", "login", VX_MCP_SERVER_NAME, "--code", "<code>"])}`;
+}
+
 function openClawProbeReadiness(
   config: { path: string; url: string; missingRequiredTools: string[] },
   deps: InstallerDeps,
@@ -222,6 +227,7 @@ function openClawProbeReadiness(
         `VX endpoint: ${config.url}`,
         "OpenClaw can reach the VX MCP server, but OAuth is not complete yet.",
         "Run `vx-mcp login openclaw` and approve the browser sign-in.",
+        openClawOAuthCompletionNote(config.path, deps),
       ],
     };
   }
@@ -1066,8 +1072,9 @@ export function loginOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
     );
   } else if (openClawOAuthRequired(readiness.notes.join("\n"))) {
     notes.push(
-      "OpenClaw OAuth still requires approval. Open the authorization URL printed by OpenClaw, approve VX, then rerun `vx-mcp login openclaw` or `vx-mcp doctor`.",
+      "OpenClaw OAuth still requires approval. Open the authorization URL printed by OpenClaw, approve VX, complete the `--code <code>` step if OpenClaw prints one, then rerun `vx-mcp smoke openclaw`.",
     );
+    notes.push(openClawOAuthCompletionNote(config.path, deps));
   } else {
     notes.push("OpenClaw OAuth completed.");
     notes.push(...readiness.notes);
