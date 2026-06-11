@@ -1118,14 +1118,31 @@ describe("handleCli", () => {
     const config = readFileSync(join(deps.homedir(), ".hermes", "config.yaml"), "utf8");
     const spawn = vi.mocked(deps.spawnSync);
     const [command, args] = spawn.mock.calls[0];
+    const shellScript = String(args.at(-1));
     const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
 
     expect(command).toBe("docker");
     expect(args).toContain("run");
     expect(args).toContain("127.0.0.1:8989:8990");
     expect(args).toContain("nousresearch/hermes-agent");
+    expect(shellScript).toContain("Authentication failed");
+    expect(shellScript).toContain("MCP call timed out");
     expect(config).toContain("redirect_port: 8989");
     expect(output).toContain("Started VX MCP login for Hermes");
+  });
+
+  it("reports Hermes Docker login helper failures", async () => {
+    const deps = createDeps();
+    mockSpawn(deps, { status: 1 });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    process.exitCode = undefined;
+
+    await handleCli(["login", "hermes"], deps);
+
+    const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(output).toContain("exited with status 1");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
   });
 });
 

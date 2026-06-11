@@ -922,6 +922,10 @@ export function installHermes(deps: InstallerDeps = defaultDeps): string[] {
 
 function hermesDockerOAuthLoginShell(): string {
   return [
+    "set -u",
+    "tmp=$(mktemp)",
+    "cleanup() { rm -f \"$tmp\" \"$tmp.status\"; }",
+    "trap cleanup EXIT",
     "python3 - <<'PY' &",
     "import socket, threading, time",
     "LISTEN = ('0.0.0.0', 8990)",
@@ -960,7 +964,18 @@ function hermesDockerOAuthLoginShell(): string {
     "    threading.Thread(target=pipe, args=(client, target), daemon=True).start()",
     "    threading.Thread(target=pipe, args=(target, client), daemon=True).start()",
     "PY",
-    "exec /opt/hermes/.venv/bin/hermes mcp login vx",
+    "forwarder_pid=$!",
+    "cleanup_forwarder() { kill \"$forwarder_pid\" >/dev/null 2>&1 || true; cleanup; }",
+    "trap cleanup_forwarder EXIT",
+    "(/opt/hermes/.venv/bin/hermes mcp login vx 2>&1; echo $? > \"$tmp.status\") | tee \"$tmp\"",
+    "hermes_status=$(cat \"$tmp.status\" 2>/dev/null || echo 1)",
+    "if grep -qi 'Authentication failed\\|Connection failed\\|MCP call timed out' \"$tmp\"; then",
+    "  exit 1",
+    "fi",
+    "if grep -qi 'Authenticated' \"$tmp\"; then",
+    "  exit 0",
+    "fi",
+    "exit \"$hermes_status\"",
   ].join("\n");
 }
 
@@ -999,6 +1014,10 @@ export function loginHermes(deps: InstallerDeps = defaultDeps): string[] {
     );
   }
   return notes;
+}
+
+function loginHermesSucceeded(notes: string[]): boolean {
+  return notes.some((note) => note.includes("OAuth completed"));
 }
 
 export function uninstallHermes(deps: InstallerDeps = defaultDeps): string[] {
@@ -1571,6 +1590,9 @@ export async function handleCli(
     console.log("Started VX MCP login for Hermes.");
     for (const note of notes) {
       console.log(`- ${note}`);
+    }
+    if (!loginHermesSucceeded(notes)) {
+      process.exitCode = 1;
     }
     return true;
   }

@@ -16,7 +16,7 @@ const argv = process.argv.slice(2);
 (async () => {
   try {
     await handleCli(argv);
-    process.exit(0);
+    process.exit(typeof process.exitCode === "number" ? process.exitCode : 0);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
