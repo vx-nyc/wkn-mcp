@@ -289,6 +289,7 @@ describe("Hermes config helpers", () => {
     expect(block).toContain(HERMES_BLOCK_START);
     expect(block).toContain("  vx:");
     expect(block).toContain(`    url: "${VX_URL}"`);
+    expect(block).toContain("    auth: oauth");
     expect(block).toContain("headers:");
     expect(block).toContain('X-Counterparty-Id: "hermes:agent"');
     expect(block).toContain('X-Counterparty-Kind: "personal-agent"');
@@ -348,6 +349,7 @@ describe("installHermes", () => {
     expect(config).toContain("mcp_servers:");
     expect(config).toContain("  vx:");
     expect(config).toContain(`url: "${VX_URL}"`);
+    expect(config).toContain("auth: oauth");
     expect(config).toContain('X-Counterparty-Client: "hermes"');
     expect(notes.join("\n")).toContain("Restart Hermes Agent");
   });

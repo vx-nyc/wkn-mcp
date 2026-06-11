@@ -1,6 +1,6 @@
 {
   "name": "@vx-nyc/vx-mcp",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": false,
   "description": "Installer for the hosted VX memory MCP server. Wires up Claude Code, Cursor, Codex, OpenClaw, and Hermes to https://api.onememory.co/mcp over HTTP with OAuth.",
   "main": "dist/index.js",

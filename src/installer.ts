@@ -839,6 +839,7 @@ export function buildHermesManagedBlock(
     HERMES_BLOCK_START,
     `  ${serverName}:`,
     `    url: "${url.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`,
+    "    auth: oauth",
     "    headers:",
     '      X-Counterparty-Id: "hermes:agent"',
     '      X-Counterparty-Kind: "personal-agent"',
