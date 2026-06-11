@@ -154,6 +154,35 @@ function openClawCommand(args: string[]): string {
   return ["npx", "openclaw", ...args].join(" ");
 }
 
+function openClawInstallProfileArgs(deps: InstallerDeps): string[] {
+  const explicit = deps.env.VX_MCP_OPENCLAW_CONFIG_PATH;
+  if (explicit) return openClawProfileArgs(explicit, deps);
+  const profile = deps.env.VX_MCP_OPENCLAW_PROFILE || deps.env.OPENCLAW_PROFILE;
+  if (profile) return ["--profile", profile];
+  const devConfigPath = join(deps.homedir(), ".openclaw-dev", "openclaw.json");
+  const defaultConfigPath = join(deps.homedir(), ".openclaw", "openclaw.json");
+  if (deps.existsSync(devConfigPath) && !deps.existsSync(defaultConfigPath)) return ["--dev"];
+  return [];
+}
+
+function openClawMcpAddArgs(profileArgs: string[] = []): string[] {
+  return [
+    ...profileArgs,
+    "mcp",
+    "add",
+    VX_MCP_SERVER_NAME,
+    "--url",
+    VX_MCP_URL,
+    "--transport",
+    "streamable-http",
+    "--auth",
+    "oauth",
+    "--include",
+    RECOMMENDED_OPENCLAW_VX_TOOLS.join(","),
+    "--no-probe",
+  ];
+}
+
 function openClawOAuthRequired(output: string): boolean {
   return /requires OAuth authorization|mcp login|OAuth is not complete|needs authentication/i.test(output);
 }
@@ -994,6 +1023,32 @@ export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
 
   const openclawCli = findCli("openclaw", deps);
   if (!openclawCli) {
+    const npxCli = findCli("npx", deps);
+    if (npxCli) {
+      const profileArgs = openClawInstallProfileArgs(deps);
+      const addArgs = ["-y", "openclaw", ...openClawMcpAddArgs(profileArgs)];
+      const addResult = deps.spawnSync(npxCli, addArgs, { encoding: "utf8" });
+      if (addResult.status === 0) {
+        notes.push(
+          `Configured OpenClaw VX MCP through npx: \`${openClawCommand(openClawMcpAddArgs(profileArgs))}\``,
+        );
+        notes.push(
+          `Exposed the core VX MCP tools for OpenClaw: ${RECOMMENDED_OPENCLAW_VX_TOOLS.join(", ")}`,
+        );
+        notes.push(
+          `Run \`${openClawCommand([...profileArgs, "mcp", "login", VX_MCP_SERVER_NAME])}\` to authorize VX with OAuth.`,
+        );
+        return notes;
+      }
+      notes.push(
+        `npx can run OpenClaw, but automatic MCP configuration failed: ${
+          addResult.stderr?.trim() || addResult.stdout?.trim() || "unknown error"
+        }`,
+      );
+      notes.push(
+        `Retry manually: ${openClawCommand(openClawMcpAddArgs(profileArgs))}`,
+      );
+    }
     notes.push(
       `OpenClaw CLI (\`openclaw\`) was not found on PATH. Install OpenClaw, then run:`,
     );

@@ -400,6 +400,40 @@ describe("installOpenClaw", () => {
     expect(notes.join("\n")).toContain(VX_URL);
   });
 
+  it("uses npx OpenClaw to write the hosted OAuth MCP config when the global CLI is missing", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(join(deps.homedir(), ".openclaw-dev", "openclaw.json"), "{}\n", "utf8");
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v openclaw
+      { status: 0, stdout: "/usr/bin/npx\n" }, // command -v npx
+      { status: 0, stdout: "Saved MCP server vx\n" },
+    );
+
+    const notes = installOpenClaw(deps);
+    expect(vi.mocked(deps.spawnSync).mock.calls[2]?.[1]).toEqual([
+      "-y",
+      "openclaw",
+      "--dev",
+      "mcp",
+      "add",
+      "vx",
+      "--url",
+      VX_URL,
+      "--transport",
+      "streamable-http",
+      "--auth",
+      "oauth",
+      "--include",
+      "vx_librarian_seed,vx_librarian_context,vx_reality,vx_recall,vx_store",
+      "--no-probe",
+    ]);
+    expect(notes.join("\n")).toContain("Configured OpenClaw VX MCP through npx");
+    expect(notes.join("\n")).toContain("npx openclaw --dev mcp login vx");
+    expect(notes.join("\n")).not.toContain("Add this to your OpenClaw plugin config");
+  });
+
   it("runs `openclaw plugins install` when the CLI is available", () => {
     const deps = createDeps();
     mockSpawn(
@@ -433,6 +467,7 @@ describe("installAll", () => {
       deps,
       { status: 1 }, // Claude CLI lookup
       { status: 1 }, // OpenClaw CLI lookup
+      { status: 1 }, // npx lookup
     );
 
     const notes = installAll(deps).join("\n");
@@ -992,6 +1027,7 @@ describe("handleCli", () => {
       deps,
       { status: 1 }, // Claude CLI lookup
       { status: 1 }, // OpenClaw CLI lookup
+      { status: 1 }, // npx lookup
     );
     vi.spyOn(console, "log").mockImplementation(() => {});
     await handleCli(["install", "all"], deps);
