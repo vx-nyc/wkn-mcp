@@ -710,6 +710,68 @@ describe("doctor/readiness", () => {
     ]);
   });
 
+  it("reports OpenClaw OAuth login as the next step when the hosted MCP server requires authorization", () => {
+    const deps = createDeps();
+    const configPath = join(deps.homedir(), ".openclaw-dev", "openclaw.json");
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          mcp: {
+            servers: {
+              vx: {
+                url: "https://api.onememory.co/mcp",
+                transport: "streamable-http",
+                auth: "oauth",
+                toolFilter: {
+                  include: [
+                    "vx_librarian_seed",
+                    "vx_librarian_context",
+                    "vx_reality",
+                    "vx_recall",
+                    "vx_store",
+                  ],
+                },
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v openclaw
+      { status: 0, stdout: "/usr/bin/npx\n" }, // command -v npx
+      {
+        status: 0,
+        stdout: JSON.stringify({
+          generatedAt: "2026-06-11T00:21:20.568Z",
+          servers: {},
+          tools: [],
+          diagnostics: [
+            {
+              serverName: "vx",
+              message: 'Error: MCP server "vx" requires OAuth authorization. Run openclaw mcp login vx.',
+            },
+          ],
+        }),
+      },
+    );
+
+    expect(getClientReadiness("openclaw", deps)).toMatchObject({
+      label: "OpenClaw",
+      status: "manual-approval",
+      notes: expect.arrayContaining([
+        expect.stringContaining("OAuth is not complete"),
+        expect.stringContaining("npx openclaw --dev mcp login vx"),
+      ]),
+    });
+  });
+
   it("treats local Ollama marker auth as ready for OpenClaw live turns", () => {
     const deps = createDeps();
     const configPath = join(deps.homedir(), ".openclaw-dev", "openclaw.json");

@@ -150,6 +150,14 @@ function openClawProfileArgs(configPath: string, deps: InstallerDeps): string[] 
   return match?.[1] ? ["--profile", match[1]] : [];
 }
 
+function openClawCommand(args: string[]): string {
+  return ["npx", "openclaw", ...args].join(" ");
+}
+
+function openClawOAuthRequired(output: string): boolean {
+  return /requires OAuth authorization|mcp login|OAuth is not complete|needs authentication/i.test(output);
+}
+
 function openClawProbeReadiness(
   config: { path: string; url: string; missingRequiredTools: string[] },
   deps: InstallerDeps,
@@ -167,6 +175,17 @@ function openClawProbeReadiness(
     },
   );
   const probeOutput = `${probe.stdout ?? ""}\n${probe.stderr ?? ""}`.trim();
+  if (openClawOAuthRequired(probeOutput)) {
+    return {
+      status: "manual-approval",
+      notes: [
+        `OpenClaw MCP config includes VX at ${config.path}.`,
+        `VX endpoint: ${config.url}`,
+        "OpenClaw can reach the VX MCP server, but OAuth is not complete yet.",
+        `Run \`${openClawCommand([...profileArgs, "mcp", "login", VX_MCP_SERVER_NAME])}\` and approve the browser sign-in.`,
+      ],
+    };
+  }
   if (probe.status !== 0) {
     return {
       status: "manual-approval",
