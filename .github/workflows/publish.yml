@@ -50,6 +50,15 @@ jobs:
           registry-url: https://npm.pkg.github.com
 
       - run: npm ci
+
+      - name: Sync package version from tag
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          package_version="${RELEASE_TAG#v}"
+          npm version --no-git-tag-version "$package_version"
+
       - run: npm run build
 
       - name: Publish to GitHub Packages
