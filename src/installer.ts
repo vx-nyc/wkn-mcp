@@ -1197,7 +1197,22 @@ function hermesSmokeReadiness(deps: InstallerDeps): Pick<ClientReadiness, "statu
   }
 
   const executable = hermesExecutableCandidate(deps);
-  if (executable) return hermesNativeSmokeReadiness(executable, deps);
+  if (executable) {
+    const native = hermesNativeSmokeReadiness(executable, deps);
+    if (native.status !== "runtime-error") return native;
+
+    const docker = hermesDockerReadiness(deps);
+    if (docker) {
+      return {
+        status: docker.status,
+        notes: [
+          ...docker.notes,
+          ...native.notes,
+        ],
+      };
+    }
+    return native;
+  }
 
   const docker = hermesDockerReadiness(deps);
   if (docker) return docker;

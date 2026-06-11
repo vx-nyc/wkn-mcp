@@ -1406,6 +1406,37 @@ describe("handleCli", () => {
     expect(notes.join("\n")).not.toContain("Hermes VX smoke ready");
   });
 
+  it("falls back to Hermes Docker smoke when the native binary cannot start", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".hermes", "bin"), { recursive: true });
+    writeFileSync(join(deps.homedir(), ".hermes", "bin", "tirith"), "", "utf8");
+    writeFileSync(
+      join(deps.homedir(), ".hermes", "config.yaml"),
+      [
+        "mcp_servers:",
+        "  vx:",
+        `    url: ${VX_URL}`,
+        "    transport: http",
+      ].join("\n"),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // hermes CLI lookup
+      { status: 1 }, // tirith CLI lookup
+      { status: 126, stderr: "exec format error" },
+      { status: 0, stdout: "hermes-dashboard\n" },
+      { status: 0, stdout: "Hermes Agent v0.14.0" },
+      { status: 0, stdout: `vx ${VX_URL}` },
+      { status: 0, stdout: "✓ connected" },
+    );
+
+    const notes = smokeHermes(deps);
+
+    expect(notes.join("\n")).toContain("Hermes Docker MCP test reports VX is connected");
+    expect(notes.join("\n")).toContain("Hermes VX smoke ready");
+  });
+
   it("dispatches Hermes smoke from the CLI", async () => {
     const deps = createDeps();
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
