@@ -334,7 +334,10 @@ npm test
 This package is released through `manual-package-release.yml`: merge to `main`,
 run the workflow with a new `vX.Y.Z` tag, and let it dispatch `publish.yml`.
 `publish.yml` can also be run manually with an existing tag for retries. It
-publishes to GitHub Packages and creates the GitHub Release notes. See
-`CHANGELOG.md` for release history.
+publishes `@vx-nyc/vx-mcp` to the public npm registry and creates the GitHub
+Release notes. The repository must have an `NPM_TOKEN` secret with publish
+access to the npm package; GitHub Packages is not used for the public installer
+because the documented `npx @vx-nyc/vx-mcp ...` commands must work without a
+GitHub Packages token. See `CHANGELOG.md` for release history.
 
 See `CONTRIBUTING.md` for contributor workflow and public-repo safety rules.
