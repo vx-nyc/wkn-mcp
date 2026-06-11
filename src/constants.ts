@@ -9,3 +9,4 @@
 export const VX_MCP_URL = "https://api.onememory.co/mcp";
 export const VX_MCP_SERVER_NAME = "vx";
 export const VX_PACKAGE_NAME = "@vx-nyc/vx-mcp";
+export const HERMES_OAUTH_REDIRECT_PORT = 8989;

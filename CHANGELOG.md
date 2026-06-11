@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] - 2026-06-11
+
+### Added
+
+- `vx-mcp login hermes` now runs a host-side Docker OAuth helper so Hermes
+  Docker can receive browser callbacks on `127.0.0.1:8989`.
+
+### Fixed
+
+- Hermes MCP installs now pin `oauth.redirect_port: 8989`, making OAuth
+  callback URLs stable and usable from the host browser.
+- `doctor` now points Docker-based Hermes users at the VX MCP login helper
+  instead of suggesting an in-container login flow whose localhost callback is
+  not reachable from the host browser.
+
 ## [1.0.5] - 2026-06-11
 
 ### Fixed

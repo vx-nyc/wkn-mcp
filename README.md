@@ -142,6 +142,9 @@ Manual equivalent — add this block under `mcp_servers` in
 mcp_servers:
   vx:
     url: "https://api.onememory.co/mcp"
+    auth: oauth
+    oauth:
+      redirect_port: 8989
     headers:
       X-Counterparty-Id: "hermes:agent"
       X-Counterparty-Kind: "personal-agent"
@@ -152,6 +155,17 @@ Hermes Agent discovers tools with the `mcp_vx_` prefix and handles OAuth when
 it first connects to the MCP endpoint. The `X-Counterparty-*` headers are
 non-secret provenance hints so VX can label Hermes memories and graph activity
 clearly; they do not grant access.
+
+If Hermes is running in Docker, use the host-side login helper so the OAuth
+browser callback can reach the container:
+
+```bash
+npx @vx-nyc/vx-mcp login hermes
+```
+
+Open the printed VX authorization URL immediately and approve access before the
+Hermes login timeout. Native Hermes builds can still use `hermes mcp login vx`
+directly.
 
 Run `npx @vx-nyc/vx-mcp doctor` after installing. If Hermes was installed with a
 Linux/ELF `tirith` binary on macOS, the doctor will report the incompatible
