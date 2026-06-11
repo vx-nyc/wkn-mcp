@@ -207,6 +207,10 @@ flow on their own: they discover `auth.onememory.co`, register themselves
 dynamically, open your browser for sign-in / consent, and store the resulting
 token in their own keychain.
 
+During consent, choose the Knowledge Contexts the client may use. The agent can
+only read or write memories inside the contexts you select; choosing a parent
+context includes its subcontexts.
+
 If you have an existing per-device VX API key from a previous version, it is
 **not used** by v1 — clients connect over OAuth-authenticated HTTP instead.
 
