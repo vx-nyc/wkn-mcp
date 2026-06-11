@@ -1036,6 +1036,7 @@ describe("doctor/readiness", () => {
     expect(lines).toContain("vx-mcp install cursor");
     expect(lines).toContain("vx-mcp install hermes");
     expect(lines).toContain("During OAuth consent, choose the Knowledge Contexts");
+    expect(lines).toContain("vx-mcp smoke openclaw");
     expect(lines).toContain("vx_librarian_seed");
     expect(lines).toContain("vx_librarian_context");
     expect(lines).toContain("vx_reality");
@@ -1107,6 +1108,7 @@ describe("handleCli", () => {
     expect(output).toContain("VX MCP readiness");
     expect(output).toContain("ChatGPT");
     expect(output).toContain("During OAuth consent, choose the Knowledge Contexts");
+    expect(output).toContain("vx-mcp smoke openclaw");
     expect(output).toContain("vx_librarian_seed");
     expect(output).toContain("vx_librarian_context");
   });

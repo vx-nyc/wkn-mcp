@@ -130,6 +130,17 @@ start that sign-in explicitly after install, run:
 npx @vx-nyc/vx-mcp login openclaw
 ```
 
+After approving VX and choosing the Knowledge Contexts OpenClaw may use, run
+the smoke check:
+
+```bash
+npx @vx-nyc/vx-mcp smoke openclaw
+```
+
+The smoke check verifies OAuth, required VX tools, and model readiness before a
+live agent turn. When everything is ready, it prints a concrete proof command
+that calls `vx_librarian_context`, `vx_store`, and `vx_recall`.
+
 To start every supported CLI login helper in one pass:
 
 ```bash
@@ -281,6 +292,8 @@ tools. See your client's tool list after installation.
 ```bash
 vx-mcp install <all|claude|cursor|codex|openclaw|hermes>
 vx-mcp uninstall <claude|cursor|codex|openclaw|hermes>
+vx-mcp login <openclaw|hermes|all>
+vx-mcp smoke <openclaw>
 vx-mcp doctor
 vx-mcp clients
 vx-mcp --version
