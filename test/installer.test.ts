@@ -861,6 +861,7 @@ describe("doctor/readiness", () => {
       notes: expect.arrayContaining([
         expect.stringContaining("OAuth is not complete"),
         expect.stringContaining("vx-mcp login openclaw"),
+        expect.stringContaining("mcp login vx --code <code>"),
       ]),
     });
   });
@@ -1259,6 +1260,7 @@ describe("handleCli", () => {
 
     const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
     expect(output).toContain("OpenClaw OAuth still requires approval");
+    expect(output).toContain("mcp login vx --code <code>");
     expect(output).not.toContain("OpenClaw OAuth completed");
     expect(process.exitCode).toBe(1);
     process.exitCode = undefined;
@@ -1295,6 +1297,7 @@ describe("handleCli", () => {
 
     const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
     expect(output).toContain("VX MCP smoke for OpenClaw");
+    expect(output).toContain("mcp login vx --code <code>");
     expect(output).toContain("OpenClaw VX smoke is not ready yet");
     expect(process.exitCode).toBe(1);
     process.exitCode = undefined;

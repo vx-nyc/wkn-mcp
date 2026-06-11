@@ -130,6 +130,13 @@ start that sign-in explicitly after install, run:
 npx @vx-nyc/vx-mcp login openclaw
 ```
 
+If OpenClaw prints an authorization-code step after approval, complete it in the
+same profile, for example:
+
+```bash
+npx openclaw --dev mcp login vx --code <code>
+```
+
 After approving VX and choosing the Knowledge Contexts OpenClaw may use, run
 the smoke check:
 
