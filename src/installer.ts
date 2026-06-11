@@ -1052,12 +1052,25 @@ export function loginOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
     encoding: "utf8",
   });
 
-  if (result.status === 0) {
-    notes.push("OpenClaw OAuth completed.");
-  } else {
+  if (result.status !== 0) {
     notes.push(
       `OpenClaw OAuth login exited with status ${result.status ?? "unknown"}. Approve the browser sign-in, then rerun vx-mcp doctor.`,
     );
+    return notes;
+  }
+
+  const readiness = openClawProbeReadiness(config, deps);
+  if (!readiness) {
+    notes.push(
+      "OpenClaw login command finished, but VX MCP could not verify OAuth because npx is unavailable. Rerun `vx-mcp doctor` to confirm the connection.",
+    );
+  } else if (openClawOAuthRequired(readiness.notes.join("\n"))) {
+    notes.push(
+      "OpenClaw OAuth still requires approval. Open the authorization URL printed by OpenClaw, approve VX, then rerun `vx-mcp login openclaw` or `vx-mcp doctor`.",
+    );
+  } else {
+    notes.push("OpenClaw OAuth completed.");
+    notes.push(...readiness.notes);
   }
   return notes;
 }

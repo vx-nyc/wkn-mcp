@@ -1170,6 +1170,25 @@ describe("handleCli", () => {
       { status: 1 }, // openclaw CLI lookup
       { status: 0, stdout: "/usr/bin/npx\n" },
       { status: 0, stdout: "Authenticated\n" },
+      { status: 0, stdout: "/usr/bin/npx\n" },
+      {
+        status: 0,
+        stdout: JSON.stringify({
+          servers: { vx: { tools: 5 } },
+          tools: [
+            "vx__vx_librarian_seed",
+            "vx__vx_librarian_context",
+            "vx__vx_reality",
+            "vx__vx_recall",
+            "vx__vx_store",
+          ],
+        }),
+      },
+      {
+        status: 0,
+        stdout:
+          "Auth overview\nProviders w/ OAuth/tokens (0): -\n\nMissing auth\n- openai Run `openclaw --profile dev models auth login --provider openai`",
+      },
     );
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -1188,6 +1207,58 @@ describe("handleCli", () => {
     expect(log.mock.calls.map((c) => c.join(" ")).join("\n")).toContain(
       "Started VX MCP login for OpenClaw",
     );
+    expect(log.mock.calls.map((c) => c.join(" ")).join("\n")).toContain(
+      "OpenClaw OAuth completed",
+    );
+  });
+
+  it("does not report OpenClaw OAuth complete when the follow-up probe still needs auth", async () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      join(deps.homedir(), ".openclaw-dev", "openclaw.json"),
+      JSON.stringify({
+        mcp: {
+          servers: {
+            vx: {
+              url: VX_URL,
+              transport: "streamable-http",
+              auth: "oauth",
+            },
+          },
+        },
+      }),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // openclaw CLI lookup
+      { status: 0, stdout: "/usr/bin/npx\n" },
+      { status: 0, stdout: "Open this URL to authorize \"vx\": https://auth.onememory.co/oauth2/auth" },
+      { status: 0, stdout: "/usr/bin/npx\n" },
+      {
+        status: 0,
+        stdout: JSON.stringify({
+          diagnostics: [
+            {
+              serverName: "vx",
+              message:
+                'Error: MCP server "vx" requires OAuth authorization. Run openclaw mcp login vx.',
+            },
+          ],
+        }),
+      },
+    );
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    process.exitCode = undefined;
+
+    await handleCli(["login", "openclaw"], deps);
+
+    const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(output).toContain("OpenClaw OAuth still requires approval");
+    expect(output).not.toContain("OpenClaw OAuth completed");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
   });
 
   it("dispatches login all for OpenClaw and Hermes", async () => {
@@ -1203,6 +1274,21 @@ describe("handleCli", () => {
       { status: 1 }, // openclaw CLI lookup
       { status: 0, stdout: "/usr/bin/npx\n" },
       { status: 0, stdout: "Authenticated\n" },
+      { status: 0, stdout: "/usr/bin/npx\n" },
+      {
+        status: 0,
+        stdout: JSON.stringify({
+          servers: { vx: { tools: 5 } },
+          tools: [
+            "vx__vx_librarian_seed",
+            "vx__vx_librarian_context",
+            "vx__vx_reality",
+            "vx__vx_recall",
+            "vx__vx_store",
+          ],
+        }),
+      },
+      { status: 0, stdout: "Auth overview\nProviders w/ OAuth/tokens (1): openai" },
       { status: 0 }, // Hermes Docker helper
     );
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
