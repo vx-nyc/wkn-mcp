@@ -18,6 +18,7 @@ import {
   removeCursorVxEntry,
   stripHermesManagedBlock,
   stripCodexManagedBlock,
+  smokeOpenClaw,
   uninstallHermes,
   uninstallClaude,
   uninstallCodex,
@@ -1259,6 +1260,77 @@ describe("handleCli", () => {
     expect(output).not.toContain("OpenClaw OAuth completed");
     expect(process.exitCode).toBe(1);
     process.exitCode = undefined;
+  });
+
+  it("dispatches OpenClaw smoke and fails while OAuth is incomplete", async () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      join(deps.homedir(), ".openclaw-dev", "openclaw.json"),
+      JSON.stringify({ mcp: { servers: { vx: { url: VX_URL } } } }),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "/usr/bin/npx\n" },
+      {
+        status: 0,
+        stdout: JSON.stringify({
+          diagnostics: [
+            {
+              serverName: "vx",
+              message:
+                'Error: MCP server "vx" requires OAuth authorization. Run openclaw mcp login vx.',
+            },
+          ],
+        }),
+      },
+    );
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    process.exitCode = undefined;
+
+    await handleCli(["smoke", "openclaw"], deps);
+
+    const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(output).toContain("VX MCP smoke for OpenClaw");
+    expect(output).toContain("OpenClaw VX smoke is not ready yet");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+  });
+
+  it("prints a live proof command when OpenClaw smoke is ready", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      join(deps.homedir(), ".openclaw-dev", "openclaw.json"),
+      JSON.stringify({ mcp: { servers: { vx: { url: VX_URL } } } }),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "/usr/bin/npx\n" },
+      {
+        status: 0,
+        stdout: JSON.stringify({
+          servers: { vx: { tools: 5 } },
+          tools: [
+            "vx__vx_librarian_seed",
+            "vx__vx_librarian_context",
+            "vx__vx_reality",
+            "vx__vx_recall",
+            "vx__vx_store",
+          ],
+        }),
+      },
+      { status: 0, stdout: "Auth overview\nProviders w/ OAuth/tokens (1): openai" },
+    );
+
+    const notes = smokeOpenClaw(deps);
+
+    expect(notes.join("\n")).toContain("OpenClaw VX smoke ready");
+    expect(notes.join("\n")).toContain("Live proof command:");
+    expect(notes.join("\n")).toContain("vx_librarian_context");
+    expect(notes.join("\n")).toContain("vx_store");
   });
 
   it("dispatches login all for OpenClaw and Hermes", async () => {
