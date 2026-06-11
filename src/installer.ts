@@ -1079,6 +1079,53 @@ function loginOpenClawSucceeded(notes: string[]): boolean {
   return notes.some((note) => note.includes("OAuth completed"));
 }
 
+export function smokeOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
+  const notes: string[] = [];
+  const config = openClawVxConfig(deps);
+  if (!config) {
+    notes.push("OpenClaw VX MCP config was not found. Run `vx-mcp install openclaw` first.");
+    return notes;
+  }
+
+  notes.push(`OpenClaw MCP config includes VX at ${config.path}.`);
+  notes.push(`VX endpoint: ${config.url}`);
+  if (config.missingRequiredTools.length > 0) {
+    notes.push(openClawToolFilterFixNote(config.missingRequiredTools));
+    return notes;
+  }
+
+  const readiness = openClawProbeReadiness(config, deps);
+  if (!readiness) {
+    notes.push(
+      "OpenClaw smoke could not run because npx is unavailable. Install OpenClaw or npx, then rerun `vx-mcp smoke openclaw`.",
+    );
+    return notes;
+  }
+
+  notes.push(...readiness.notes);
+  if (readiness.status !== "ready") {
+    notes.push(
+      "OpenClaw VX smoke is not ready yet. Complete the OAuth/model step above, then rerun `vx-mcp smoke openclaw`.",
+    );
+    return notes;
+  }
+
+  notes.push("OpenClaw VX smoke ready: OAuth, required VX tools, and model auth are available.");
+  notes.push(
+    [
+      "Live proof command:",
+      "npx openclaw --dev agent --local --json",
+      "--session-key agent:vx-smoke:one-memory",
+      '--message "Use VX MCP tools. First call vx_librarian_context, then call vx_store to save this memory in VX: VX OpenClaw live smoke can write and recall shared context. Then call vx_recall for VX OpenClaw live smoke and answer with the context and retrieved memory."',
+    ].join(" "),
+  );
+  return notes;
+}
+
+function smokeOpenClawSucceeded(notes: string[]): boolean {
+  return notes.some((note) => note.includes("OpenClaw VX smoke ready"));
+}
+
 export function uninstallHermes(deps: InstallerDeps = defaultDeps): string[] {
   const notes: string[] = [];
   const home = hermesHome(deps);
@@ -1582,6 +1629,7 @@ const USAGE = [
   `  install <all|claude|cursor|codex|openclaw|hermes>  Wire up clients to ${VX_MCP_URL}`,
   `  uninstall <claude|cursor|codex|openclaw|hermes>    Remove the VX MCP entry`,
   `  login <openclaw|hermes|all>               Authorize OAuth MCP clients that support CLI login`,
+  `  smoke <openclaw>                          Verify MCP OAuth/tools/model readiness before a live agent turn`,
   `  doctor                                    Report local VX MCP readiness`,
   `  clients                                   List supported clients`,
   `  --version, -v                             Print package version`,
@@ -1686,6 +1734,26 @@ export async function handleCli(
 
     {
       console.error("Unknown login target. Supported: openclaw, hermes, all.");
+      printHelp();
+      return true;
+    }
+  }
+
+  if (command === "smoke") {
+    if (target === "openclaw") {
+      const notes = smokeOpenClaw(deps);
+      console.log("VX MCP smoke for OpenClaw.");
+      for (const note of notes) {
+        console.log(`- ${note}`);
+      }
+      if (!smokeOpenClawSucceeded(notes)) {
+        process.exitCode = 1;
+      }
+      return true;
+    }
+
+    {
+      console.error("Unknown smoke target. Supported: openclaw.");
       printHelp();
       return true;
     }
