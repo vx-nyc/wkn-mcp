@@ -603,7 +603,7 @@ describe("doctor/readiness", () => {
       status: "manual-approval",
       notes: expect.arrayContaining([
         expect.stringContaining("Hermes Docker container 'hermes-dashboard' is running"),
-        expect.stringContaining("MCP config lists the hosted VX endpoint"),
+        expect.stringContaining("MCP config lists the selected VX MCP endpoint"),
         expect.stringContaining("OAuth is not complete"),
         expect.stringContaining("401 Unauthorized"),
         expect.stringContaining("vx-mcp login hermes"),
@@ -710,7 +710,7 @@ describe("doctor/readiness", () => {
           mcp: {
             servers: {
               vx: {
-                url: "http://localhost:3000/mcp",
+                url: VX_URL,
                 transport: "streamable-http",
                 headers: { "X-API-Key": "vx_test_local" },
               },
@@ -733,13 +733,13 @@ describe("doctor/readiness", () => {
       status: "manual-approval",
       notes: expect.arrayContaining([
         expect.stringContaining("OpenClaw MCP config includes VX"),
-        expect.stringContaining("http://localhost:3000/mcp"),
+        expect.stringContaining(VX_URL),
         expect.stringContaining("OpenClaw CLI is not on PATH"),
       ]),
     });
   });
 
-  it("uses npx OpenClaw probe to distinguish MCP connectivity from missing model auth", () => {
+  it("reports OpenClaw needs reinstall when the config points at a different MCP endpoint", () => {
     const deps = createDeps();
     const configPath = join(deps.homedir(), ".openclaw-dev", "openclaw.json");
     mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
@@ -761,6 +761,41 @@ describe("doctor/readiness", () => {
       ),
       "utf8",
     );
+    mockSpawn(deps, { status: 1 });
+
+    expect(getClientReadiness("openclaw", deps)).toMatchObject({
+      label: "OpenClaw",
+      status: "needs-install",
+      notes: expect.arrayContaining([
+        expect.stringContaining("points at http://localhost:3000/mcp"),
+        expect.stringContaining(`Selected VX MCP endpoint: ${VX_URL}`),
+        "Run: vx-mcp install openclaw",
+      ]),
+    });
+  });
+
+  it("uses npx OpenClaw probe to distinguish MCP connectivity from missing model auth", () => {
+    const deps = createDeps();
+    const configPath = join(deps.homedir(), ".openclaw-dev", "openclaw.json");
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          mcp: {
+            servers: {
+              vx: {
+                url: VX_URL,
+                transport: "streamable-http",
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
     mockSpawn(
       deps,
       { status: 1 }, // command -v openclaw
@@ -768,7 +803,7 @@ describe("doctor/readiness", () => {
       {
         status: 0,
         stdout: JSON.stringify({
-          servers: { vx: { launch: "http://localhost:3000/mcp", tools: 24 } },
+          servers: { vx: { launch: VX_URL, tools: 24 } },
           tools: [
             "vx__vx_librarian_seed",
             "vx__vx_librarian_context",
@@ -878,7 +913,7 @@ describe("doctor/readiness", () => {
           mcp: {
             servers: {
               vx: {
-                url: "http://localhost:3000/mcp",
+                url: VX_URL,
                 transport: "streamable-http",
               },
             },
@@ -896,7 +931,7 @@ describe("doctor/readiness", () => {
       {
         status: 0,
         stdout: JSON.stringify({
-          servers: { vx: { launch: "http://localhost:3000/mcp", tools: 24 } },
+          servers: { vx: { launch: VX_URL, tools: 24 } },
           tools: [
             "vx__vx_librarian_seed",
             "vx__vx_librarian_context",
@@ -943,7 +978,7 @@ describe("doctor/readiness", () => {
           mcp: {
             servers: {
               vx: {
-                url: "http://localhost:3000/mcp",
+                url: VX_URL,
                 transport: "streamable-http",
                 toolFilter: {
                   include: ["vx_reality", "vx_recall", "vx_store"],
@@ -983,7 +1018,7 @@ describe("doctor/readiness", () => {
           mcp: {
             servers: {
               vx: {
-                url: "http://localhost:3000/mcp",
+                url: VX_URL,
                 transport: "streamable-http",
               },
             },
@@ -1001,7 +1036,7 @@ describe("doctor/readiness", () => {
       {
         status: 0,
         stdout: JSON.stringify({
-          servers: { vx: { launch: "http://localhost:3000/mcp", tools: 3 } },
+          servers: { vx: { launch: VX_URL, tools: 3 } },
           tools: ["vx__vx_reality", "vx__vx_recall", "vx__vx_store"],
           diagnostics: [],
         }),
@@ -1483,7 +1518,7 @@ describe("handleCli", () => {
 
     const notes = smokeHermes(deps);
 
-    expect(notes.join("\n")).toContain("Hermes Docker MCP config lists the hosted VX endpoint");
+    expect(notes.join("\n")).toContain("Hermes Docker MCP config lists the selected VX MCP endpoint");
     expect(notes.join("\n")).toContain("Hermes VX smoke ready");
   });
 

@@ -13,6 +13,11 @@ This package is **just an installer**. The MCP server itself is hosted at
 `https://api.onememory.co/mcp` and handles OAuth automatically — there is no
 API key to manage, and nothing runs locally beyond the wiring step.
 
+For local product verification, set `VX_MCP_URL` to point the installer and
+readiness checks at a dev MCP endpoint, for example
+`VX_MCP_URL=http://localhost:3000/mcp npm run start -- doctor`. Production
+users should leave this unset.
+
 ## Requirements
 
 - Node.js 18 or newer
@@ -339,6 +344,12 @@ in v1.0.0.
 npm install
 npm run build
 npm test
+```
+
+Local stack smoke checks can override the MCP endpoint without changing code:
+
+```bash
+VX_MCP_URL=http://localhost:3000/mcp node dist/index.js doctor
 ```
 
 This package is released through `manual-package-release.yml`: merge to `main`,
