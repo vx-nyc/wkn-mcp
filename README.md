@@ -345,14 +345,17 @@ This package is released through `manual-package-release.yml`: merge to `main`,
 run the workflow with a new `vX.Y.Z` tag, and let it dispatch `publish.yml`.
 `publish.yml` can also be run manually with an existing tag for retries. It
 publishes `@vx-nyc/vx-mcp` to the public npm registry and creates the GitHub
-Release notes. The repository must have an `NPM_TOKEN` secret with publish
-access to the npm package; GitHub Packages is not used for the public installer
-because the documented `npx @vx-nyc/vx-mcp ...` commands must work without a
-GitHub Packages token. See `CHANGELOG.md` for release history.
+Release notes. GitHub Packages is not used for the public installer because
+the documented `npx @vx-nyc/vx-mcp ...` commands must work without a GitHub
+Packages token. See `CHANGELOG.md` for release history.
 
-`manual-package-release.yml` validates `NPM_TOKEN` with npm before creating a
-tag so an expired token cannot leave a half-created release. If a publish retry
-is needed after a tag already exists, run `publish.yml` manually with that
-existing tag instead of creating a new one.
+Once the npm package exists and has trusted publishing configured for this
+repository workflow, `publish.yml` publishes through GitHub OIDC instead of a
+long-lived npm token. The first npm publish still needs a working bootstrap
+publish token because trusted publishing is configured on the npm package after
+that package exists. `manual-package-release.yml` checks which path applies
+before creating a tag so a broken bootstrap token cannot leave a half-created
+release. If a publish retry is needed after a tag already exists, run
+`publish.yml` manually with that existing tag instead of creating a new one.
 
 See `CONTRIBUTING.md` for contributor workflow and public-repo safety rules.
