@@ -973,6 +973,8 @@ function hermesDockerOAuthLoginShell(): string {
     "forwarder_pid=$!",
     "cleanup_forwarder() { kill \"$forwarder_pid\" >/dev/null 2>&1 || true; cleanup; }",
     "trap cleanup_forwarder EXIT",
+    "echo 'VX MCP Hermes OAuth: open the authorization URL as soon as Hermes prints it.'",
+    "echo 'Hermes login times out after about 40 seconds; keep this terminal visible while approving VX.'",
     "(/opt/hermes/.venv/bin/hermes mcp login vx 2>&1; echo $? > \"$tmp.status\") | tee \"$tmp\"",
     "hermes_status=$(cat \"$tmp.status\" 2>/dev/null || echo 1)",
     "if grep -qi 'Authentication failed\\|Connection failed\\|MCP call timed out' \"$tmp\"; then",
