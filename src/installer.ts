@@ -60,6 +60,8 @@ const RECOMMENDED_OPENCLAW_VX_TOOLS = [
   "vx_recall",
   "vx_store",
 ] as const;
+const DEFAULT_HERMES_DOCKER_LOGIN_ATTEMPTS = 3;
+const MAX_HERMES_DOCKER_LOGIN_ATTEMPTS = 10;
 
 export type ReadinessStatus =
   | "ready"
@@ -135,6 +137,19 @@ function copySkill(
   const source = join(repoRootFromModule(), ...sourceParts);
   ensureDir(dirname(destination), deps);
   deps.copyFileSync(source, destination);
+}
+
+function envPositiveInt(
+  deps: InstallerDeps,
+  key: string,
+  fallback: number,
+  max = Number.MAX_SAFE_INTEGER,
+): number {
+  const raw = deps.env[key];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
 }
 
 function findCli(binary: string, deps: InstallerDeps): string | null {
@@ -936,9 +951,10 @@ export function installHermes(deps: InstallerDeps = defaultDeps): string[] {
   return notes;
 }
 
-function hermesDockerOAuthLoginShell(): string {
+function hermesDockerOAuthLoginShell(attempts: number): string {
   return [
     "set -u",
+    `attempts=${attempts}`,
     "tmp=$(mktemp)",
     "cleanup() { rm -f \"$tmp\" \"$tmp.status\"; }",
     "trap cleanup EXIT",
@@ -984,22 +1000,40 @@ function hermesDockerOAuthLoginShell(): string {
     "cleanup_forwarder() { kill \"$forwarder_pid\" >/dev/null 2>&1 || true; cleanup; }",
     "trap cleanup_forwarder EXIT",
     "echo 'VX MCP Hermes OAuth: open the authorization URL as soon as Hermes prints it.'",
-    "echo 'Hermes login times out after about 40 seconds; keep this terminal visible while approving VX.'",
-    "(/opt/hermes/.venv/bin/hermes mcp login vx 2>&1; echo $? > \"$tmp.status\") | tee \"$tmp\"",
-    "hermes_status=$(cat \"$tmp.status\" 2>/dev/null || echo 1)",
-    "if grep -qi 'Authentication failed\\|Connection failed\\|MCP call timed out' \"$tmp\"; then",
-    "  exit 1",
-    "fi",
-    "if grep -qi 'Authenticated' \"$tmp\"; then",
-    "  exit 0",
-    "fi",
-    "exit \"$hermes_status\"",
+    "echo \"Hermes login may time out if approval is not completed quickly; this helper will try up to ${attempts} time(s).\"",
+    "attempt=1",
+    "last_status=1",
+    "while [ \"$attempt\" -le \"$attempts\" ]; do",
+    "  : > \"$tmp\"",
+    "  rm -f \"$tmp.status\"",
+    "  echo \"VX MCP Hermes OAuth attempt ${attempt}/${attempts}.\"",
+    "  (/opt/hermes/.venv/bin/hermes mcp login vx 2>&1; echo $? > \"$tmp.status\") | tee \"$tmp\"",
+    "  hermes_status=$(cat \"$tmp.status\" 2>/dev/null || echo 1)",
+    "  last_status=\"$hermes_status\"",
+    "  if grep -qi 'Authenticated' \"$tmp\"; then",
+    "    exit 0",
+    "  fi",
+    "  if grep -qi 'Authentication failed\\|Connection failed' \"$tmp\"; then",
+    "    exit 1",
+    "  fi",
+    "  if [ \"$attempt\" -lt \"$attempts\" ]; then",
+    "    echo 'Hermes OAuth did not complete before this attempt ended. Starting a fresh authorization attempt; use the newest URL printed below.'",
+    "  fi",
+    "  attempt=$((attempt + 1))",
+    "done",
+    "exit \"$last_status\"",
   ].join("\n");
 }
 
 export function loginHermes(deps: InstallerDeps = defaultDeps): string[] {
   const notes = installHermes(deps);
   const home = hermesHome(deps);
+  const attempts = envPositiveInt(
+    deps,
+    "VX_MCP_HERMES_LOGIN_ATTEMPTS",
+    DEFAULT_HERMES_DOCKER_LOGIN_ATTEMPTS,
+    MAX_HERMES_DOCKER_LOGIN_ATTEMPTS,
+  );
   const result = deps.spawnSync(
     "docker",
     [
@@ -1016,7 +1050,7 @@ export function loginHermes(deps: InstallerDeps = defaultDeps): string[] {
       "sh",
       "nousresearch/hermes-agent",
       "-lc",
-      hermesDockerOAuthLoginShell(),
+      hermesDockerOAuthLoginShell(attempts),
     ],
     {
       stdio: "inherit",
@@ -1028,7 +1062,7 @@ export function loginHermes(deps: InstallerDeps = defaultDeps): string[] {
     notes.push("Hermes OAuth completed through the Docker login helper.");
   } else {
     notes.push(
-      `Hermes Docker OAuth helper exited with status ${result.status ?? "unknown"}. Open the printed URL quickly and approve VX before Hermes' login timeout.`,
+      `Hermes Docker OAuth helper exited with status ${result.status ?? "unknown"} after ${attempts} attempt(s). Open the newest printed URL quickly and approve VX, or rerun with VX_MCP_HERMES_LOGIN_ATTEMPTS=5.`,
     );
   }
   return notes;

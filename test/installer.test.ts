@@ -1168,11 +1168,30 @@ describe("handleCli", () => {
     expect(args).toContain("127.0.0.1:8989:8990");
     expect(args).toContain("nousresearch/hermes-agent");
     expect(shellScript).toContain("open the authorization URL as soon as Hermes prints it");
-    expect(shellScript).toContain("times out after about 40 seconds");
+    expect(shellScript).toContain("attempts=3");
+    expect(shellScript).toContain("attempt ${attempt}/${attempts}");
+    expect(shellScript).toContain("use the newest URL printed below");
     expect(shellScript).toContain("Authentication failed");
-    expect(shellScript).toContain("MCP call timed out");
     expect(config).toContain("redirect_port: 8989");
     expect(output).toContain("Started VX MCP login for Hermes");
+  });
+
+  it("lets operators increase Hermes Docker OAuth login attempts", async () => {
+    const deps = createDeps({ env: { VX_MCP_HERMES_LOGIN_ATTEMPTS: "5" } });
+    mockSpawn(deps, { status: 1 });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    process.exitCode = undefined;
+
+    await handleCli(["login", "hermes"], deps);
+
+    const spawn = vi.mocked(deps.spawnSync);
+    const shellScript = String(spawn.mock.calls[0]?.[1].at(-1));
+    const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(shellScript).toContain("attempts=5");
+    expect(output).toContain("after 5 attempt(s)");
+    expect(output).toContain("VX_MCP_HERMES_LOGIN_ATTEMPTS=5");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
   });
 
   it("reports Hermes Docker login helper failures", async () => {
@@ -1185,6 +1204,7 @@ describe("handleCli", () => {
 
     const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
     expect(output).toContain("exited with status 1");
+    expect(output).toContain("after 3 attempt(s)");
     expect(process.exitCode).toBe(1);
     process.exitCode = undefined;
   });
