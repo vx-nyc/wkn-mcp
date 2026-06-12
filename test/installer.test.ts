@@ -17,6 +17,7 @@ import {
   installOpenClaw,
   removeCursorVxEntry,
   stripHermesManagedBlock,
+  stripHermesServerBlock,
   stripCodexManagedBlock,
   smokeHermes,
   smokeOpenClaw,
@@ -291,6 +292,7 @@ describe("Hermes config helpers", () => {
     expect(block).toContain(HERMES_BLOCK_START);
     expect(block).toContain("  vx:");
     expect(block).toContain(`    url: "${VX_URL}"`);
+    expect(block).toContain("    connect_timeout: 180");
     expect(block).toContain("    auth: oauth");
     expect(block).toContain("    oauth:");
     expect(block).toContain("      redirect_port: 8989");
@@ -327,6 +329,45 @@ describe("Hermes config helpers", () => {
     expect((twice.match(new RegExp(HERMES_BLOCK_START, "g")) || []).length).toBe(1);
   });
 
+  it("removes legacy Hermes vx server entries while preserving other MCP servers", () => {
+    const current = [
+      "theme: dark",
+      "",
+      "mcp_servers:",
+      "  vx:",
+      "    url: https://api.onememory.co/mcp",
+      "    auth: oauth",
+      "  vx-local:",
+      "    url: http://host.docker.internal:3000/mcp",
+      "  time:",
+      "    command: \"uvx\"",
+    ].join("\n");
+
+    const stripped = stripHermesServerBlock(current);
+
+    expect(stripped).not.toContain("  vx:\n");
+    expect(stripped).not.toContain("https://api.onememory.co/mcp");
+    expect(stripped).toContain("  vx-local:");
+    expect(stripped).toContain("  time:");
+  });
+
+  it("upserts one managed Hermes vx block over legacy vx entries", () => {
+    const current = [
+      "mcp_servers:",
+      "  vx:",
+      "    url: https://api.onememory.co/mcp",
+      "    auth: oauth",
+      "  vx-local:",
+      "    url: http://host.docker.internal:3000/mcp",
+    ].join("\n");
+
+    const next = upsertHermesManagedBlock(current);
+
+    expect((next.match(/^  vx:$/gm) || []).length).toBe(1);
+    expect(next).toContain("connect_timeout: 180");
+    expect(next).toContain("  vx-local:");
+  });
+
   it("strips only the managed Hermes VX block", () => {
     const current = upsertHermesManagedBlock([
       "mcp_servers:",
@@ -353,6 +394,7 @@ describe("installHermes", () => {
     expect(config).toContain("mcp_servers:");
     expect(config).toContain("  vx:");
     expect(config).toContain(`url: "${VX_URL}"`);
+    expect(config).toContain("connect_timeout: 180");
     expect(config).toContain("auth: oauth");
     expect(config).toContain("redirect_port: 8989");
     expect(config).toContain('X-Counterparty-Client: "hermes"');
@@ -1193,6 +1235,7 @@ describe("handleCli", () => {
     expect(shellScript).toContain("open the authorization URL as soon as Hermes prints it");
     expect(shellScript).toContain("attempts=3");
     expect(shellScript).toContain("attempt ${attempt}/${attempts}");
+    expect(shellScript).toContain("_probe_single_server(name, server_config, connect_timeout=180)");
     expect(shellScript).toContain("use the newest URL printed below");
     expect(shellScript).toContain("Authentication failed");
     expect(config).toContain("redirect_port: 8989");

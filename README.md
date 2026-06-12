@@ -192,6 +192,7 @@ Manual equivalent — add this block under `mcp_servers` in
 mcp_servers:
   vx:
     url: "https://api.onememory.co/mcp"
+    connect_timeout: 180
     auth: oauth
     oauth:
       redirect_port: 8989
@@ -214,8 +215,10 @@ npx @vx-nyc/vx-mcp login hermes
 ```
 
 Open the printed VX authorization URL immediately and approve access before the
-Hermes login timeout. Native Hermes builds can still use `hermes mcp login vx`
-directly.
+Hermes login timeout. The helper writes a single managed `vx` entry, removes
+older duplicate `vx` entries, and uses an extended OAuth probe timeout so a
+normal browser approval has time to complete. Native Hermes builds can still
+use `hermes mcp login vx` directly.
 
 Run `npx @vx-nyc/vx-mcp doctor` after installing. If Hermes was installed with a
 Linux/ELF `tirith` binary on macOS, the doctor will report the incompatible
