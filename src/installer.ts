@@ -74,6 +74,7 @@ const OPENCLAW_VX_RUNTIME_POLICY = {
 } as const;
 const DEFAULT_HERMES_DOCKER_LOGIN_ATTEMPTS = 3;
 const MAX_HERMES_DOCKER_LOGIN_ATTEMPTS = 10;
+const HERMES_MCP_CONNECT_TIMEOUT_SECONDS = 180;
 
 export type ReadinessStatus =
   | "ready"
@@ -920,6 +921,7 @@ export function buildHermesManagedBlock(
     HERMES_BLOCK_START,
     `  ${serverName}:`,
     `    url: "${url.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`,
+    `    connect_timeout: ${HERMES_MCP_CONNECT_TIMEOUT_SECONDS}`,
     "    auth: oauth",
     "    oauth:",
     `      redirect_port: ${HERMES_OAUTH_REDIRECT_PORT}`,
@@ -945,11 +947,48 @@ export function stripHermesManagedBlock(content: string): string {
   return `${before}${after}`.trimEnd();
 }
 
+export function stripHermesServerBlock(content: string, serverName: string = VX_MCP_SERVER_NAME): string {
+  const lines = content.split(/\r?\n/);
+  const mcpIndex = lines.findIndex((line) => /^mcp_servers:\s*$/.test(line));
+  if (mcpIndex === -1) return content.trimEnd();
+
+  const nextLines: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (index <= mcpIndex) {
+      nextLines.push(lines[index]);
+      continue;
+    }
+
+    const line = lines[index] ?? "";
+    if (/^\S/.test(line) && line.trim() !== "") {
+      nextLines.push(...lines.slice(index));
+      break;
+    }
+
+    if (line === `  ${serverName}:`) {
+      index += 1;
+      while (index < lines.length) {
+        const candidate = lines[index] ?? "";
+        if (/^  [^ ].*:\s*$/.test(candidate) || (/^\S/.test(candidate) && candidate.trim() !== "")) {
+          index -= 1;
+          break;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
+    nextLines.push(line);
+  }
+
+  return nextLines.join("\n").trimEnd();
+}
+
 export function upsertHermesManagedBlock(
   content: string,
   block: string = buildHermesManagedBlock(),
 ): string {
-  const stripped = stripHermesManagedBlock(content);
+  const stripped = stripHermesServerBlock(stripHermesManagedBlock(content));
   const lines = stripped ? stripped.split(/\r?\n/) : [];
   const mcpIndex = lines.findIndex((line) => /^mcp_servers:\s*$/.test(line));
 
@@ -1043,7 +1082,35 @@ function hermesDockerOAuthLoginShell(attempts: number): string {
     "  : > \"$tmp\"",
     "  rm -f \"$tmp.status\"",
     "  echo \"VX MCP Hermes OAuth attempt ${attempt}/${attempts}.\"",
-    "  (/opt/hermes/.venv/bin/hermes mcp login vx 2>&1; echo $? > \"$tmp.status\") | tee \"$tmp\"",
+    "  (/opt/hermes/.venv/bin/python - <<'PYLOGIN' 2>&1; echo $? > \"$tmp.status\") | tee \"$tmp\"",
+    "from hermes_cli.config import load_config",
+    "from hermes_cli.mcp_config import _get_mcp_servers, _probe_single_server",
+    "from hermes_cli.colors import Colors, color",
+    "from tools.mcp_oauth_manager import get_manager",
+    "",
+    "name = 'vx'",
+    "servers = _get_mcp_servers(load_config())",
+    "if name not in servers:",
+    "    raise SystemExit(\"Server 'vx' not found in Hermes config\")",
+    "server_config = servers[name]",
+    "if server_config.get('auth') != 'oauth':",
+    "    raise SystemExit(f\"Server 'vx' is not configured for OAuth (auth={server_config.get('auth')})\")",
+    "try:",
+    "    get_manager().remove(name)",
+    "except Exception as exc:",
+    "    print(color(f\"  ⚠ Could not clear existing OAuth state: {exc}\", Colors.YELLOW))",
+    "print()",
+    "print(color(\"  Starting OAuth flow for 'vx'...\", Colors.DIM))",
+    "try:",
+    "    tools = _probe_single_server(name, server_config, connect_timeout=180)",
+    "    if tools:",
+    "        print(color(f\"  ✓ Authenticated — {len(tools)} tool(s) available\", Colors.GREEN))",
+    "    else:",
+    "        print(color(\"  ✓ Authenticated (server reported no tools)\", Colors.GREEN))",
+    "except Exception as exc:",
+    "    print(color(f\"  ✗ Authentication failed: {exc}\", Colors.RED))",
+    "    raise SystemExit(1)",
+    "PYLOGIN",
     "  hermes_status=$(cat \"$tmp.status\" 2>/dev/null || echo 1)",
     "  last_status=\"$hermes_status\"",
     "  if grep -qi 'Authenticated' \"$tmp\"; then",
