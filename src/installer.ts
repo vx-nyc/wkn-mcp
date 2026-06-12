@@ -60,6 +60,18 @@ const RECOMMENDED_OPENCLAW_VX_TOOLS = [
   "vx_recall",
   "vx_store",
 ] as const;
+const OPENCLAW_VX_RUNTIME_POLICY = {
+  tools: {
+    profile: "full",
+    alsoAllow: ["group:plugins"],
+    toolSearch: {
+      enabled: true,
+      mode: "tools",
+      searchDefaultLimit: 8,
+      maxSearchLimit: 20,
+    },
+  },
+} as const;
 const DEFAULT_HERMES_DOCKER_LOGIN_ATTEMPTS = 3;
 const MAX_HERMES_DOCKER_LOGIN_ATTEMPTS = 10;
 
@@ -211,6 +223,30 @@ function openClawMcpAddArgs(profileArgs: string[] = []): string[] {
     RECOMMENDED_OPENCLAW_VX_TOOLS.join(","),
     "--no-probe",
   ];
+}
+
+function openClawRuntimePolicyPatch(): string {
+  return JSON.stringify(OPENCLAW_VX_RUNTIME_POLICY);
+}
+
+function applyOpenClawRuntimePolicy(
+  executable: string,
+  argsPrefix: string[],
+  deps: InstallerDeps,
+): { ok: true } | { ok: false; output: string } {
+  const result = deps.spawnSync(
+    executable,
+    [...argsPrefix, "config", "patch", "--stdin"],
+    {
+      encoding: "utf8",
+      input: openClawRuntimePolicyPatch(),
+    },
+  );
+  if (result.status === 0) return { ok: true };
+  return {
+    ok: false,
+    output: result.stderr?.trim() || result.stdout?.trim() || "unknown error",
+  };
 }
 
 function openClawOAuthRequired(output: string): boolean {
@@ -1459,6 +1495,23 @@ export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
           notes.push(
             `Exposed the core VX MCP tools for OpenClaw: ${RECOMMENDED_OPENCLAW_VX_TOOLS.join(", ")}`,
           );
+          const policyResult = applyOpenClawRuntimePolicy(
+            npxCli,
+            ["-y", "openclaw", ...profileArgs],
+            deps,
+          );
+          if (policyResult.ok) {
+            notes.push(
+              "Prepared OpenClaw for live VX turns with plugin tools enabled and compact tool search.",
+            );
+          } else {
+            notes.push(
+              `OpenClaw MCP was configured, but live-turn tool policy could not be updated automatically: ${policyResult.output}`,
+            );
+            notes.push(
+              "Run manually: openclaw config patch --stdin with tools.alsoAllow=[\"group:plugins\"] and tools.toolSearch enabled.",
+            );
+          }
           notes.push(
             `Run \`${openClawCommand([...profileArgs, "mcp", "login", VX_MCP_SERVER_NAME])}\` to authorize VX with OAuth.`,
           );
@@ -1526,6 +1579,21 @@ export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
     );
     notes.push(
       `Retry manually: openclaw plugins install ${VX_PACKAGE_NAME}`,
+    );
+  }
+
+  const profileArgs = openClawInstallProfileArgs(deps);
+  const policyResult = applyOpenClawRuntimePolicy(openclawCli, profileArgs, deps);
+  if (policyResult.ok) {
+    notes.push(
+      "Prepared OpenClaw for live VX turns with plugin tools enabled and compact tool search.",
+    );
+  } else {
+    notes.push(
+      `OpenClaw plugin installed, but live-turn tool policy could not be updated automatically: ${policyResult.output}`,
+    );
+    notes.push(
+      "Run manually: openclaw config patch --stdin with tools.alsoAllow=[\"group:plugins\"] and tools.toolSearch enabled.",
     );
   }
 

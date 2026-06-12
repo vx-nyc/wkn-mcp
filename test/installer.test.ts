@@ -429,6 +429,7 @@ describe("installOpenClaw", () => {
       { status: 1 }, // command -v openclaw
       { status: 0, stdout: "/usr/bin/npx\n" }, // command -v npx
       { status: 0, stdout: "Saved MCP server vx\n" },
+      { status: 0, stdout: "Applied 1 config update(s).\n" },
     );
 
     const notes = installOpenClaw(deps);
@@ -450,8 +451,20 @@ describe("installOpenClaw", () => {
       "--no-probe",
     ]);
     expect(notes.join("\n")).toContain("Configured OpenClaw VX MCP through npx");
+    expect(notes.join("\n")).toContain("Prepared OpenClaw for live VX turns");
     expect(notes.join("\n")).toContain("npx openclaw --dev mcp login vx");
     expect(notes.join("\n")).not.toContain("Add this to your OpenClaw plugin config");
+    expect(vi.mocked(deps.spawnSync).mock.calls[3]?.[1]).toEqual([
+      "-y",
+      "openclaw",
+      "--dev",
+      "config",
+      "patch",
+      "--stdin",
+    ]);
+    expect(vi.mocked(deps.spawnSync).mock.calls[3]?.[2]).toMatchObject({
+      input: expect.stringContaining("toolSearch"),
+    });
   });
 
   it("runs `openclaw plugins install` when the CLI is available", () => {
@@ -461,6 +474,7 @@ describe("installOpenClaw", () => {
       { status: 0, stdout: "/usr/local/bin/openclaw\n" },
       { status: 0 },
       { status: 0 },
+      { status: 0, stdout: "Applied 1 config update(s).\n" },
     );
     const notes = installOpenClaw(deps);
     expect(vi.mocked(deps.spawnSync).mock.calls[1]?.[1]).toEqual([
@@ -477,6 +491,15 @@ describe("installOpenClaw", () => {
     ]);
     expect(notes.join("\n")).toContain("Installed the VX plugin for OpenClaw");
     expect(notes.join("\n")).toContain("Exposed the core VX MCP tools for OpenClaw");
+    expect(notes.join("\n")).toContain("Prepared OpenClaw for live VX turns");
+    expect(vi.mocked(deps.spawnSync).mock.calls[3]?.[1]).toEqual([
+      "config",
+      "patch",
+      "--stdin",
+    ]);
+    expect(vi.mocked(deps.spawnSync).mock.calls[3]?.[2]).toMatchObject({
+      input: expect.stringContaining("group:plugins"),
+    });
   });
 });
 
