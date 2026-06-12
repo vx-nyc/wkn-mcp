@@ -109,7 +109,11 @@ npx @vx-nyc/vx-mcp install openclaw
 ```
 
 If the `openclaw` CLI is on your PATH this will run
-`openclaw plugins install @vx-nyc/vx-mcp` and print the plugin config snippet.
+`openclaw plugins install @vx-nyc/vx-mcp`, expose the core VX MCP tools, and
+enable OpenClaw's compact tool-search surface for live agent turns. The compact
+tool surface matters for local embedded agents because it keeps the MCP/plugin
+catalog out of the prompt while still letting OpenClaw call VX tools.
+The installer also prints the plugin config snippet.
 Otherwise it prints the snippet for manual install:
 
 ```json
@@ -152,6 +156,11 @@ npx @vx-nyc/vx-mcp smoke openclaw
 The smoke check verifies OAuth, required VX tools, and model readiness before a
 live agent turn. When everything is ready, it prints a concrete proof command
 that calls `vx_librarian_context`, `vx_store`, and `vx_recall`.
+
+If a live OpenClaw turn reports unknown VX tools or immediately attempts
+compaction, rerun `npx @vx-nyc/vx-mcp install openclaw`. The installer applies
+OpenClaw's `group:plugins` tool policy and `toolSearch` setting so VX MCP tools
+are enabled without overflowing the local agent prompt.
 
 To start every supported CLI login helper in one pass:
 
