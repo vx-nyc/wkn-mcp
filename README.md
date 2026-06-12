@@ -26,6 +26,13 @@ users should leave this unset.
 
 ## Quick start
 
+Until the first public npm publish is complete, you can run the installer from
+GitHub with the same CLI surface:
+
+```bash
+npx --package github:vx-nyc/vx-mcp vx-mcp install all
+```
+
 ### All supported local clients
 
 ```bash
@@ -377,5 +384,8 @@ that package exists. `manual-package-release.yml` checks which path applies
 before creating a tag so a broken bootstrap token cannot leave a half-created
 release. If a publish retry is needed after a tag already exists, run
 `publish.yml` manually with that existing tag instead of creating a new one.
+GitHub installs run the package `prepare` script, so `npx --package
+github:vx-nyc/vx-mcp vx-mcp ...` remains a temporary fallback while npm is not
+available.
 
 See `CONTRIBUTING.md` for contributor workflow and public-repo safety rules.
