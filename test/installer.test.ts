@@ -1038,6 +1038,7 @@ describe("doctor/readiness", () => {
       status: "manual-approval",
       notes: expect.arrayContaining([
         expect.stringContaining("token audience is empty"),
+        expect.stringContaining("MCP resource audience fix"),
         expect.stringContaining("vx-mcp login openclaw"),
         expect.stringContaining("https://api.onememory.co"),
         expect.stringContaining("401 after successful authentication"),
