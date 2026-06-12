@@ -35,6 +35,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -52,6 +53,7 @@ function createDeps(overrides: Partial<InstallerDeps> = {}): InstallerDeps {
     copyFileSync,
     existsSync,
     mkdirSync,
+    readdirSync,
     readFileSync,
     rmSync,
     writeFileSync,
@@ -76,6 +78,12 @@ function mockSpawn(deps: InstallerDeps, ...returns: { status: number; stdout?: s
       signal: null,
     });
   }
+}
+
+function unsignedJwt(payload: Record<string, unknown>): string {
+  const encode = (value: unknown) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${encode({ alg: "none", typ: "JWT" })}.${encode(payload)}.`;
 }
 
 describe("Codex managed-block helpers", () => {
@@ -963,6 +971,76 @@ describe("doctor/readiness", () => {
         expect.stringContaining("OAuth is not complete"),
         expect.stringContaining("vx-mcp login openclaw"),
         expect.stringContaining("mcp login vx --code <code>"),
+      ]),
+    });
+  });
+
+  it("reports OpenClaw OAuth tokens that are missing the VX API audience", () => {
+    const deps = createDeps();
+    const openclawDir = join(deps.homedir(), ".openclaw-dev");
+    const configPath = join(openclawDir, "openclaw.json");
+    mkdirSync(join(openclawDir, "mcp-oauth"), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          mcp: {
+            servers: {
+              vx: {
+                url: VX_URL,
+                transport: "streamable-http",
+                auth: "oauth",
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    writeFileSync(
+      join(openclawDir, "mcp-oauth", "vx-test-client.json"),
+      JSON.stringify({
+        tokens: {
+          access_token: unsignedJwt({
+            iss: "https://auth.onememory.co",
+            aud: [],
+            client_id: "test-client",
+          }),
+        },
+      }),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v openclaw
+      { status: 0, stdout: "/usr/bin/npx\n" }, // command -v npx
+      {
+        status: 0,
+        stdout: JSON.stringify({
+          generatedAt: "2026-06-12T15:53:19.305Z",
+          servers: {},
+          tools: [],
+          diagnostics: [
+            {
+              serverName: "vx",
+              message:
+                "Error: Streamable HTTP error: Server returned 401 after successful authentication",
+            },
+          ],
+        }),
+      },
+    );
+
+    expect(getClientReadiness("openclaw", deps)).toMatchObject({
+      label: "OpenClaw",
+      status: "manual-approval",
+      notes: expect.arrayContaining([
+        expect.stringContaining("token audience is empty"),
+        expect.stringContaining("vx-mcp login openclaw"),
+        expect.stringContaining("https://api.onememory.co"),
+        expect.stringContaining("401 after successful authentication"),
       ]),
     });
   });
