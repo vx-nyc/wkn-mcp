@@ -337,7 +337,7 @@ function openClawTokenAudienceNote(configPath: string, deps: InstallerDeps): str
         ? [rawAud]
         : [];
     if (!audiences.map(normalizeAudience).includes(expected)) {
-      return `OpenClaw has an OAuth token for VX, but its token audience is ${audiences.length ? audiences.join(", ") : "empty"}. Run \`vx-mcp login openclaw\` again after the hosted VX auth consent fix is deployed so the token includes ${expected}.`;
+      return `OpenClaw has an OAuth token for VX, but its token audience is ${audiences.length ? audiences.join(", ") : "empty"}. Run \`vx-mcp login openclaw\` again after the hosted VX MCP resource audience fix is deployed so the token includes ${expected}.`;
     }
   }
 
