@@ -1133,6 +1133,133 @@ function smokeOpenClawSucceeded(notes: string[]): boolean {
   return notes.some((note) => note.includes("OpenClaw VX smoke ready"));
 }
 
+function hermesNativeSmokeReadiness(
+  executable: string,
+  deps: InstallerDeps,
+): Pick<ClientReadiness, "status" | "notes"> {
+  const version = deps.spawnSync(executable, ["--version"], {
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  const versionOutput = `${version.stdout ?? ""}\n${version.stderr ?? ""}`.trim();
+  if (version.status !== 0) {
+    return {
+      status: "runtime-error",
+      notes: [
+        `Hermes config points at the hosted VX endpoint, but the local runtime could not start: ${versionOutput || `exit ${version.status ?? "unknown"}`}`,
+      ],
+    };
+  }
+
+  const notes = [
+    `Hermes config points at the hosted VX endpoint and the local Hermes runtime is executable: ${firstLine(versionOutput) || "version detected"}.`,
+  ];
+  const test = deps.spawnSync(executable, ["mcp", "test", VX_MCP_SERVER_NAME], {
+    encoding: "utf8",
+    timeout: 20000,
+  });
+  const testOutput = `${test.stdout ?? ""}\n${test.stderr ?? ""}`.trim();
+  if (/Invalid registration response/i.test(testOutput)) {
+    const invalidFields = ["logo_uri", "tos_uri", "policy_uri"]
+      .filter((field) => testOutput.includes(field))
+      .join(", ");
+    return {
+      status: "runtime-error",
+      notes: [
+        ...notes,
+        `Hermes reached VX OAuth registration, but the registration response is invalid${invalidFields ? ` for: ${invalidFields}` : ""}.`,
+        "Update VX MCP compatibility or Hermes runtime support, then rerun `hermes mcp login vx`.",
+      ],
+    };
+  }
+  if (/401|Unauthorized|needs authentication|auth/i.test(testOutput)) {
+    const authSummary = /401\s+Unauthorized/i.test(testOutput)
+      ? "401 Unauthorized"
+      : firstLine(testOutput) || "authentication required";
+    return {
+      status: "manual-approval",
+      notes: [
+        ...notes,
+        `Hermes can reach VX MCP, but OAuth is not complete: ${authSummary}.`,
+        "Run `vx-mcp login hermes` or `hermes mcp login vx`, approve VX in the browser, then rerun `vx-mcp smoke hermes`.",
+      ],
+    };
+  }
+  if (test.status === 0 && /✓|success|connected/i.test(testOutput)) {
+    return {
+      status: "ready",
+      notes: [...notes, "Hermes MCP test reports VX is connected."],
+    };
+  }
+
+  return {
+    status: "manual-approval",
+    notes: [
+      ...notes,
+      `Hermes VX MCP connection still needs verification: ${firstLine(testOutput) || `exit ${test.status ?? "unknown"}`}.`,
+      "Run `vx-mcp login hermes` or `hermes mcp login vx`, approve VX in the browser, then rerun `vx-mcp smoke hermes`.",
+    ],
+  };
+}
+
+function hermesSmokeReadiness(deps: InstallerDeps): Pick<ClientReadiness, "status" | "notes"> {
+  const configPath = hermesConfigPath(deps);
+  const content = deps.existsSync(configPath) ? readText(configPath, deps) : "";
+  if (!content.includes("mcp_servers:") || !content.includes(`${VX_MCP_SERVER_NAME}:`) || !hasHostedUrl(content)) {
+    const docker = hermesDockerReadiness(deps);
+    if (docker) return docker;
+    return getClientReadiness("hermes", deps);
+  }
+
+  const executable = hermesExecutableCandidate(deps);
+  if (executable) {
+    const native = hermesNativeSmokeReadiness(executable, deps);
+    if (native.status !== "runtime-error") return native;
+
+    const docker = hermesDockerReadiness(deps);
+    if (docker) {
+      return {
+        status: docker.status,
+        notes: [
+          ...docker.notes,
+          ...native.notes,
+        ],
+      };
+    }
+    return native;
+  }
+
+  const docker = hermesDockerReadiness(deps);
+  if (docker) return docker;
+
+  return getClientReadiness("hermes", deps);
+}
+
+export function smokeHermes(deps: InstallerDeps = defaultDeps): string[] {
+  const readiness = hermesSmokeReadiness(deps);
+  const notes = [...readiness.notes];
+  if (readiness.status !== "ready") {
+    notes.push(
+      "Hermes VX smoke is not ready yet. Complete the install/OAuth/runtime step above, then rerun `vx-mcp smoke hermes`.",
+    );
+    return notes;
+  }
+
+  notes.push("Hermes VX smoke ready: MCP config and runtime checks are available.");
+  notes.push(
+    [
+      "Live proof prompt:",
+      "Use VX MCP tools. First call vx_librarian_context, then save this memory in VX:",
+      "VX Hermes live smoke can write and recall shared context. Then recall VX Hermes live smoke and answer with the retrieved memory.",
+    ].join(" "),
+  );
+  return notes;
+}
+
+function smokeHermesSucceeded(notes: string[]): boolean {
+  return notes.some((note) => note.includes("Hermes VX smoke ready"));
+}
+
 export function uninstallHermes(deps: InstallerDeps = defaultDeps): string[] {
   const notes: string[] = [];
   const home = hermesHome(deps);
@@ -1637,7 +1764,7 @@ const USAGE = [
   `  install <all|claude|cursor|codex|openclaw|hermes>  Wire up clients to ${VX_MCP_URL}`,
   `  uninstall <claude|cursor|codex|openclaw|hermes>    Remove the VX MCP entry`,
   `  login <openclaw|hermes|all>               Authorize OAuth MCP clients that support CLI login`,
-  `  smoke <openclaw>                          Verify MCP OAuth/tools/model readiness before a live agent turn`,
+  `  smoke <openclaw|hermes>                   Verify MCP OAuth/tools/model readiness before a live agent turn`,
   `  doctor                                    Report local VX MCP readiness`,
   `  clients                                   List supported clients`,
   `  --version, -v                             Print package version`,
@@ -1760,8 +1887,20 @@ export async function handleCli(
       return true;
     }
 
+    if (target === "hermes") {
+      const notes = smokeHermes(deps);
+      console.log("VX MCP smoke for Hermes.");
+      for (const note of notes) {
+        console.log(`- ${note}`);
+      }
+      if (!smokeHermesSucceeded(notes)) {
+        process.exitCode = 1;
+      }
+      return true;
+    }
+
     {
-      console.error("Unknown smoke target. Supported: openclaw.");
+      console.error("Unknown smoke target. Supported: openclaw, hermes.");
       printHelp();
       return true;
     }

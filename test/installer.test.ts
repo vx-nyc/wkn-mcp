@@ -18,6 +18,7 @@ import {
   removeCursorVxEntry,
   stripHermesManagedBlock,
   stripCodexManagedBlock,
+  smokeHermes,
   smokeOpenClaw,
   uninstallHermes,
   uninstallClaude,
@@ -1336,6 +1337,166 @@ describe("handleCli", () => {
     expect(notes.join("\n")).toContain("Live proof command:");
     expect(notes.join("\n")).toContain("vx_librarian_context");
     expect(notes.join("\n")).toContain("vx_store");
+  });
+
+  it("reports Hermes smoke not ready when install is missing", () => {
+    const deps = createDeps();
+
+    const notes = smokeHermes(deps);
+
+    expect(notes.join("\n")).toContain("Run: vx-mcp install hermes");
+    expect(notes.join("\n")).toContain("Hermes VX smoke is not ready yet");
+  });
+
+  it("prints a live proof prompt when Hermes smoke is ready", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".hermes", "bin"), { recursive: true });
+    writeFileSync(join(deps.homedir(), ".hermes", "bin", "tirith"), "", "utf8");
+    writeFileSync(
+      join(deps.homedir(), ".hermes", "config.yaml"),
+      [
+        "mcp_servers:",
+        "  vx:",
+        `    url: ${VX_URL}`,
+        "    transport: http",
+      ].join("\n"),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // hermes CLI lookup
+      { status: 1 }, // tirith CLI lookup
+      { status: 0, stdout: "Hermes Agent v0.14.0" },
+      { status: 0, stdout: "✓ connected" },
+    );
+
+    const notes = smokeHermes(deps);
+
+    expect(notes.join("\n")).toContain("Hermes VX smoke ready");
+    expect(notes.join("\n")).toContain("Live proof prompt:");
+    expect(notes.join("\n")).toContain("vx_librarian_context");
+  });
+
+  it("does not mark Hermes smoke ready until MCP auth is verified", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".hermes", "bin"), { recursive: true });
+    writeFileSync(join(deps.homedir(), ".hermes", "bin", "tirith"), "", "utf8");
+    writeFileSync(
+      join(deps.homedir(), ".hermes", "config.yaml"),
+      [
+        "mcp_servers:",
+        "  vx:",
+        `    url: ${VX_URL}`,
+        "    transport: http",
+      ].join("\n"),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // hermes CLI lookup
+      { status: 1 }, // tirith CLI lookup
+      { status: 0, stdout: "Hermes Agent v0.14.0" },
+      { status: 1, stderr: "401 Unauthorized" },
+    );
+
+    const notes = smokeHermes(deps);
+
+    expect(notes.join("\n")).toContain("OAuth is not complete");
+    expect(notes.join("\n")).toContain("Hermes VX smoke is not ready yet");
+    expect(notes.join("\n")).not.toContain("Hermes VX smoke ready");
+  });
+
+  it("reports native Hermes registration failures before OAuth guidance", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".hermes", "bin"), { recursive: true });
+    writeFileSync(join(deps.homedir(), ".hermes", "bin", "tirith"), "", "utf8");
+    writeFileSync(
+      join(deps.homedir(), ".hermes", "config.yaml"),
+      [
+        "mcp_servers:",
+        "  vx:",
+        `    url: ${VX_URL}`,
+        "    transport: http",
+      ].join("\n"),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // hermes CLI lookup
+      { status: 1 }, // tirith CLI lookup
+      { status: 0, stdout: "Hermes Agent v0.14.0" },
+      {
+        status: 1,
+        stderr: "Invalid registration response for OAuthClientInformationFull: logo_uri",
+      },
+    );
+
+    const notes = smokeHermes(deps);
+
+    expect(notes.join("\n")).toContain("registration response is invalid for: logo_uri");
+    expect(notes.join("\n")).not.toContain("OAuth is not complete");
+    expect(notes.join("\n")).toContain("Hermes VX smoke is not ready yet");
+  });
+
+  it("falls back to Hermes Docker smoke when the native binary cannot start", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".hermes", "bin"), { recursive: true });
+    writeFileSync(join(deps.homedir(), ".hermes", "bin", "tirith"), "", "utf8");
+    writeFileSync(
+      join(deps.homedir(), ".hermes", "config.yaml"),
+      [
+        "mcp_servers:",
+        "  vx:",
+        `    url: ${VX_URL}`,
+        "    transport: http",
+      ].join("\n"),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // hermes CLI lookup
+      { status: 1 }, // tirith CLI lookup
+      { status: 126, stderr: "exec format error" },
+      { status: 0, stdout: "hermes-dashboard\n" },
+      { status: 0, stdout: "Hermes Agent v0.14.0" },
+      { status: 0, stdout: `vx ${VX_URL}` },
+      { status: 0, stdout: "✓ connected" },
+    );
+
+    const notes = smokeHermes(deps);
+
+    expect(notes.join("\n")).toContain("Hermes Docker MCP test reports VX is connected");
+    expect(notes.join("\n")).toContain("Hermes VX smoke ready");
+  });
+
+  it("supports Hermes Docker smoke without a host Hermes config", () => {
+    const deps = createDeps();
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "hermes-dashboard\n" },
+      { status: 0, stdout: "Hermes Agent v0.14.0" },
+      { status: 0, stdout: `vx ${VX_URL}` },
+      { status: 0, stdout: "✓ connected" },
+    );
+
+    const notes = smokeHermes(deps);
+
+    expect(notes.join("\n")).toContain("Hermes Docker MCP config lists the hosted VX endpoint");
+    expect(notes.join("\n")).toContain("Hermes VX smoke ready");
+  });
+
+  it("dispatches Hermes smoke from the CLI", async () => {
+    const deps = createDeps();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    process.exitCode = undefined;
+
+    await handleCli(["smoke", "hermes"], deps);
+
+    const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(output).toContain("VX MCP smoke for Hermes");
+    expect(output).toContain("Hermes VX smoke is not ready yet");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
   });
 
   it("dispatches login all for OpenClaw and Hermes", async () => {
