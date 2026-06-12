@@ -1376,6 +1376,40 @@ describe("handleCli", () => {
     expect(notes.join("\n")).toContain("vx_store");
   });
 
+  it("prints the selected OpenClaw profile in the live proof command", () => {
+    const deps = createDeps({ env: { VX_MCP_OPENCLAW_PROFILE: "local-vx" } });
+    mkdirSync(join(deps.homedir(), ".openclaw-local-vx"), { recursive: true });
+    writeFileSync(
+      join(deps.homedir(), ".openclaw-local-vx", "openclaw.json"),
+      JSON.stringify({ mcp: { servers: { vx: { url: VX_URL } } } }),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "/usr/bin/npx\n" },
+      {
+        status: 0,
+        stdout: JSON.stringify({
+          servers: { vx: { tools: 5 } },
+          tools: [
+            "vx__vx_librarian_seed",
+            "vx__vx_librarian_context",
+            "vx__vx_reality",
+            "vx__vx_recall",
+            "vx__vx_store",
+          ],
+        }),
+      },
+      { status: 0, stdout: "Auth overview\nProviders w/ OAuth/tokens (1): ollama" },
+    );
+
+    const notes = smokeOpenClaw(deps);
+
+    expect(notes.join("\n")).toContain("OpenClaw VX smoke ready");
+    expect(notes.join("\n")).toContain("npx openclaw --profile local-vx agent --local --json");
+    expect(notes.join("\n")).not.toContain("npx openclaw --dev agent --local --json");
+  });
+
   it("reports Hermes smoke not ready when install is missing", () => {
     const deps = createDeps();
 
@@ -1520,6 +1554,30 @@ describe("handleCli", () => {
 
     expect(notes.join("\n")).toContain("Hermes Docker MCP config lists the selected VX MCP endpoint");
     expect(notes.join("\n")).toContain("Hermes VX smoke ready");
+  });
+
+  it("supports a custom Hermes MCP server name for Docker smoke", () => {
+    const deps = createDeps({ env: { VX_MCP_HERMES_SERVER_NAME: "vx-local" } });
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "hermes-dashboard\n" },
+      { status: 0, stdout: "Hermes Agent v0.14.0" },
+      { status: 0, stdout: "vx-local http://host.docker.intern..." },
+      { status: 0, stdout: "Authorization: Bear***0000\n✓ connected" },
+    );
+
+    const notes = smokeHermes(deps);
+    const calls = vi.mocked(deps.spawnSync).mock.calls;
+
+    expect(notes.join("\n")).toContain("Hermes VX smoke ready");
+    expect(notes.join("\n")).toContain("endpoint display may be truncated");
+    expect(calls[3]?.[1]).toEqual([
+      "exec",
+      "hermes-dashboard",
+      "sh",
+      "-lc",
+      "timeout 15 /opt/hermes/.venv/bin/hermes mcp test vx-local 2>&1",
+    ]);
   });
 
   it("dispatches Hermes smoke from the CLI", async () => {

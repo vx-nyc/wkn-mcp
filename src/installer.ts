@@ -155,6 +155,11 @@ function openClawCommand(args: string[]): string {
   return ["npx", "openclaw", ...args].join(" ");
 }
 
+function hermesMcpServerName(deps: InstallerDeps): string {
+  const name = deps.env.VX_MCP_HERMES_SERVER_NAME || VX_MCP_SERVER_NAME;
+  return /^[a-zA-Z0-9_-]+$/.test(name) ? name : VX_MCP_SERVER_NAME;
+}
+
 function hasOpenClawInstallSignal(deps: InstallerDeps): boolean {
   if (deps.env.VX_MCP_OPENCLAW_CONFIG_PATH) return true;
   if (deps.env.VX_MCP_OPENCLAW_PROFILE || deps.env.OPENCLAW_PROFILE) return true;
@@ -400,6 +405,7 @@ function firstLine(text: string): string {
 function hermesDockerReadiness(deps: InstallerDeps): Pick<ClientReadiness, "status" | "notes"> | null {
   const containerName = deps.env.VX_MCP_HERMES_DOCKER_CONTAINER || "hermes-dashboard";
   const hermesBin = deps.env.VX_MCP_HERMES_DOCKER_BIN || "/opt/hermes/.venv/bin/hermes";
+  const serverName = hermesMcpServerName(deps);
   const ps = deps.spawnSync("docker", ["ps", "--format", "{{.Names}}"], {
     encoding: "utf8",
     timeout: 3000,
@@ -443,21 +449,25 @@ function hermesDockerReadiness(deps: InstallerDeps): Pick<ClientReadiness, "stat
     },
   );
   const listOutput = `${list?.stdout ?? ""}\n${list?.stderr ?? ""}`.trim();
-  if (!list || list.status !== 0 || !hasSelectedMcpUrl(listOutput)) {
+  if (!list || list.status !== 0 || !listOutput.includes(serverName)) {
     return {
       status: "needs-install",
       notes: [
         ...notes,
-        "Hermes is running in Docker, but its in-container MCP config does not list the selected VX MCP endpoint.",
+        `Hermes is running in Docker, but its in-container MCP config does not list the '${serverName}' server.`,
         "Run `vx-mcp install hermes` against the Hermes home used by the container, or add VX from Hermes with `hermes mcp add`.",
       ],
     };
   }
-  notes.push("Hermes Docker MCP config lists the selected VX MCP endpoint.");
+  notes.push(
+    hasSelectedMcpUrl(listOutput)
+      ? "Hermes Docker MCP config lists the selected VX MCP endpoint."
+      : `Hermes Docker MCP config lists '${serverName}'; endpoint display may be truncated, so smoke will verify with mcp test.`,
+  );
 
   const test = deps.spawnSync(
     "docker",
-    ["exec", containerName, "sh", "-lc", `timeout 15 ${hermesBin} mcp test vx 2>&1`],
+    ["exec", containerName, "sh", "-lc", `timeout 15 ${hermesBin} mcp test ${serverName} 2>&1`],
     {
       encoding: "utf8",
       timeout: 20000,
@@ -473,11 +483,17 @@ function hermesDockerReadiness(deps: InstallerDeps): Pick<ClientReadiness, "stat
       notes: [
         ...notes,
         `Hermes Docker reached VX OAuth registration, but the registration response is invalid${invalidFields ? ` for: ${invalidFields}` : ""}.`,
-        "Deploy the VX OAuth registration compatibility fix, then rerun `hermes mcp login vx`.",
+        `Deploy the VX OAuth registration compatibility fix, then rerun \`hermes mcp login ${serverName}\`.`,
       ],
     };
   }
-  if (/401|Unauthorized|needs authentication|auth/i.test(testOutput)) {
+  if (test?.status === 0 && /✓|success|connected/i.test(testOutput)) {
+    return {
+      status: "ready",
+      notes: [...notes, "Hermes Docker MCP test reports VX is connected."],
+    };
+  }
+  if (/401|Unauthorized|needs authentication|authorization required|oauth callback/i.test(testOutput)) {
     const authSummary = /401\s+Unauthorized/i.test(testOutput)
       ? "401 Unauthorized"
       : firstLine(testOutput) || "authentication required";
@@ -488,12 +504,6 @@ function hermesDockerReadiness(deps: InstallerDeps): Pick<ClientReadiness, "stat
         `Hermes Docker can reach VX MCP, but OAuth is not complete: ${authSummary}.`,
         `Run \`vx-mcp login hermes\` from the host so the OAuth callback on 127.0.0.1:${HERMES_OAUTH_REDIRECT_PORT} can reach Hermes Docker, then approve sign-in in the browser.`,
       ],
-    };
-  }
-  if (test?.status === 0 && /✓|success|connected/i.test(testOutput)) {
-    return {
-      status: "ready",
-      notes: [...notes, "Hermes Docker MCP test reports VX is connected."],
     };
   }
 
@@ -1120,10 +1130,11 @@ export function smokeOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
   }
 
   notes.push("OpenClaw VX smoke ready: OAuth, required VX tools, and model auth are available.");
+  const profileArgs = openClawProfileArgs(config.path, deps);
   notes.push(
     [
       "Live proof command:",
-      "npx openclaw --dev agent --local --json",
+      openClawCommand([...profileArgs, "agent", "--local", "--json"]),
       "--session-key agent:vx-smoke:one-memory",
       '--message "Use VX MCP tools. First call vx_librarian_context, then call vx_store to save this memory in VX: VX OpenClaw live smoke can write and recall shared context. Then call vx_recall for VX OpenClaw live smoke and answer with the context and retrieved memory."',
     ].join(" "),
@@ -1139,6 +1150,7 @@ function hermesNativeSmokeReadiness(
   executable: string,
   deps: InstallerDeps,
 ): Pick<ClientReadiness, "status" | "notes"> {
+  const serverName = hermesMcpServerName(deps);
   const version = deps.spawnSync(executable, ["--version"], {
     encoding: "utf8",
     timeout: 5000,
@@ -1156,7 +1168,7 @@ function hermesNativeSmokeReadiness(
   const notes = [
     `Hermes config points at the selected VX MCP endpoint and the local Hermes runtime is executable: ${firstLine(versionOutput) || "version detected"}.`,
   ];
-  const test = deps.spawnSync(executable, ["mcp", "test", VX_MCP_SERVER_NAME], {
+  const test = deps.spawnSync(executable, ["mcp", "test", serverName], {
     encoding: "utf8",
     timeout: 20000,
   });
@@ -1170,20 +1182,7 @@ function hermesNativeSmokeReadiness(
       notes: [
         ...notes,
         `Hermes reached VX OAuth registration, but the registration response is invalid${invalidFields ? ` for: ${invalidFields}` : ""}.`,
-        "Update VX MCP compatibility or Hermes runtime support, then rerun `hermes mcp login vx`.",
-      ],
-    };
-  }
-  if (/401|Unauthorized|needs authentication|auth/i.test(testOutput)) {
-    const authSummary = /401\s+Unauthorized/i.test(testOutput)
-      ? "401 Unauthorized"
-      : firstLine(testOutput) || "authentication required";
-    return {
-      status: "manual-approval",
-      notes: [
-        ...notes,
-        `Hermes can reach VX MCP, but OAuth is not complete: ${authSummary}.`,
-        "Run `vx-mcp login hermes` or `hermes mcp login vx`, approve VX in the browser, then rerun `vx-mcp smoke hermes`.",
+        `Update VX MCP compatibility or Hermes runtime support, then rerun \`hermes mcp login ${serverName}\`.`,
       ],
     };
   }
@@ -1193,13 +1192,26 @@ function hermesNativeSmokeReadiness(
       notes: [...notes, "Hermes MCP test reports VX is connected."],
     };
   }
+  if (/401|Unauthorized|needs authentication|authorization required|oauth callback/i.test(testOutput)) {
+    const authSummary = /401\s+Unauthorized/i.test(testOutput)
+      ? "401 Unauthorized"
+      : firstLine(testOutput) || "authentication required";
+    return {
+      status: "manual-approval",
+      notes: [
+        ...notes,
+        `Hermes can reach VX MCP, but OAuth is not complete: ${authSummary}.`,
+        `Run \`vx-mcp login hermes\` or \`hermes mcp login ${serverName}\`, approve VX in the browser, then rerun \`vx-mcp smoke hermes\`.`,
+      ],
+    };
+  }
 
   return {
     status: "manual-approval",
     notes: [
       ...notes,
       `Hermes VX MCP connection still needs verification: ${firstLine(testOutput) || `exit ${test.status ?? "unknown"}`}.`,
-      "Run `vx-mcp login hermes` or `hermes mcp login vx`, approve VX in the browser, then rerun `vx-mcp smoke hermes`.",
+      `Run \`vx-mcp login hermes\` or \`hermes mcp login ${serverName}\`, approve VX in the browser, then rerun \`vx-mcp smoke hermes\`.`,
     ],
   };
 }
@@ -1207,7 +1219,8 @@ function hermesNativeSmokeReadiness(
 function hermesSmokeReadiness(deps: InstallerDeps): Pick<ClientReadiness, "status" | "notes"> {
   const configPath = hermesConfigPath(deps);
   const content = deps.existsSync(configPath) ? readText(configPath, deps) : "";
-  if (!content.includes("mcp_servers:") || !content.includes(`${VX_MCP_SERVER_NAME}:`) || !hasSelectedMcpUrl(content)) {
+  const serverName = hermesMcpServerName(deps);
+  if (!content.includes("mcp_servers:") || !content.includes(`${serverName}:`) || !hasSelectedMcpUrl(content)) {
     const docker = hermesDockerReadiness(deps);
     if (docker) return docker;
     return getClientReadiness("hermes", deps);
@@ -1220,6 +1233,7 @@ function hermesSmokeReadiness(deps: InstallerDeps): Pick<ClientReadiness, "statu
 
     const docker = hermesDockerReadiness(deps);
     if (docker) {
+      if (docker.status === "ready") return docker;
       return {
         status: docker.status,
         notes: [
@@ -1701,7 +1715,8 @@ export function getClientReadiness(
     case "hermes": {
       const configPath = hermesConfigPath(deps);
       const content = deps.existsSync(configPath) ? readText(configPath, deps) : "";
-      if (content.includes("mcp_servers:") && content.includes(`${VX_MCP_SERVER_NAME}:`) && hasSelectedMcpUrl(content)) {
+      const serverName = hermesMcpServerName(deps);
+      if (content.includes("mcp_servers:") && content.includes(`${serverName}:`) && hasSelectedMcpUrl(content)) {
         const runtime = hermesRuntimeReadiness(deps);
         return {
           target,
