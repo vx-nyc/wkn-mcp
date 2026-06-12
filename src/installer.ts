@@ -2,6 +2,7 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -94,6 +95,7 @@ export type InstallerDeps = {
   copyFileSync: typeof copyFileSync;
   existsSync: typeof existsSync;
   mkdirSync: typeof mkdirSync;
+  readdirSync: typeof readdirSync;
   readFileSync: typeof readFileSync;
   rmSync: typeof rmSync;
   writeFileSync: typeof writeFileSync;
@@ -106,6 +108,7 @@ const defaultDeps: InstallerDeps = {
   copyFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -254,9 +257,91 @@ function openClawOAuthRequired(output: string): boolean {
   return /requires OAuth authorization|mcp login|OAuth is not complete|needs authentication/i.test(output);
 }
 
+function openClawAuthorizationFailed(output: string): string | null {
+  if (!/401|Unauthorized|after successful authentication/i.test(output)) return null;
+  try {
+    const jsonStart = output.indexOf("{");
+    const jsonEnd = output.lastIndexOf("}");
+    const json = jsonStart >= 0 && jsonEnd > jsonStart ? output.slice(jsonStart, jsonEnd + 1) : output;
+    const parsed = JSON.parse(json) as { diagnostics?: Array<{ message?: unknown }> };
+    const message = parsed.diagnostics
+      ?.map((diagnostic) => diagnostic.message)
+      .find((message): message is string => typeof message === "string" && message.trim().length > 0);
+    if (message) return message;
+  } catch {
+    // Non-JSON stderr from OpenClaw is still useful through the first line.
+  }
+  return firstLine(output) || "VX MCP returned an authorization error.";
+}
+
 function openClawOAuthCompletionNote(configPath: string, deps: InstallerDeps): string {
   const profileArgs = openClawProfileArgs(configPath, deps);
   return `If OpenClaw prints an authorization code step, complete it with: ${openClawCommand([...profileArgs, "mcp", "login", VX_MCP_SERVER_NAME, "--code", "<code>"])}`;
+}
+
+function normalizeAudience(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function expectedMcpAudience(): string {
+  try {
+    return normalizeAudience(new URL(VX_MCP_URL).origin);
+  } catch {
+    return normalizeAudience(VX_MCP_URL.replace(/\/mcp$/, ""));
+  }
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const [, payload] = token.split(".");
+  if (!payload) return null;
+  try {
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+  } catch {
+    return null;
+  }
+}
+
+function openClawOAuthDir(configPath: string): string {
+  return join(dirname(configPath), "mcp-oauth");
+}
+
+function openClawTokenAudienceNote(configPath: string, deps: InstallerDeps): string | null {
+  const oauthDir = openClawOAuthDir(configPath);
+  if (!deps.existsSync(oauthDir)) return null;
+
+  let files: string[] = [];
+  try {
+    files = deps.readdirSync(oauthDir);
+  } catch {
+    return null;
+  }
+
+  const expected = expectedMcpAudience();
+  for (const file of files) {
+    if (!file.startsWith(`${VX_MCP_SERVER_NAME}-`) || !file.endsWith(".json")) continue;
+    const tokenState = readJsonFile<{ tokens?: { access_token?: string } }>(
+      join(oauthDir, file),
+      deps,
+    );
+    const accessToken = tokenState?.tokens?.access_token;
+    if (!accessToken) continue;
+
+    const payload = decodeJwtPayload(accessToken);
+    const rawAud = payload?.aud;
+    const audiences = Array.isArray(rawAud)
+      ? rawAud.filter((aud): aud is string => typeof aud === "string")
+      : typeof rawAud === "string"
+        ? [rawAud]
+        : [];
+    if (!audiences.map(normalizeAudience).includes(expected)) {
+      return `OpenClaw has an OAuth token for VX, but its token audience is ${audiences.length ? audiences.join(", ") : "empty"}. Run \`vx-mcp login openclaw\` again after the hosted VX auth consent fix is deployed so the token includes ${expected}.`;
+    }
+  }
+
+  return null;
 }
 
 function openClawProbeReadiness(
@@ -288,12 +373,27 @@ function openClawProbeReadiness(
       ],
     };
   }
-  if (probe.status !== 0) {
+  const authorizationFailure = openClawAuthorizationFailed(probeOutput);
+  if (authorizationFailure) {
+    const tokenAudienceNote = openClawTokenAudienceNote(config.path, deps);
     return {
       status: "manual-approval",
       notes: [
         `OpenClaw MCP config includes VX at ${config.path}.`,
         `VX endpoint: ${config.url}`,
+        ...(tokenAudienceNote ? [tokenAudienceNote] : []),
+        `npx can run OpenClaw, but VX MCP authorization did not pass yet: ${authorizationFailure}.`,
+      ],
+    };
+  }
+  if (probe.status !== 0) {
+    const tokenAudienceNote = openClawTokenAudienceNote(config.path, deps);
+    return {
+      status: "manual-approval",
+      notes: [
+        `OpenClaw MCP config includes VX at ${config.path}.`,
+        `VX endpoint: ${config.url}`,
+        ...(tokenAudienceNote ? [tokenAudienceNote] : []),
         ...(config.missingRequiredTools.length > 0
           ? [openClawToolFilterFixNote(config.missingRequiredTools)]
           : []),
@@ -1258,7 +1358,9 @@ export function smokeOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
     return notes;
   }
 
-  notes.push(...readiness.notes);
+  for (const note of readiness.notes) {
+    if (!notes.includes(note)) notes.push(note);
+  }
   if (readiness.status !== "ready") {
     notes.push(
       "OpenClaw VX smoke is not ready yet. Complete the OAuth/model step above, then rerun `vx-mcp smoke openclaw`.",
