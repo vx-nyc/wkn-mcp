@@ -1132,6 +1132,8 @@ describe("handleCli", () => {
     expect(args).toContain("run");
     expect(args).toContain("127.0.0.1:8989:8990");
     expect(args).toContain("nousresearch/hermes-agent");
+    expect(shellScript).toContain("open the authorization URL as soon as Hermes prints it");
+    expect(shellScript).toContain("times out after about 40 seconds");
     expect(shellScript).toContain("Authentication failed");
     expect(shellScript).toContain("MCP call timed out");
     expect(config).toContain("redirect_port: 8989");
