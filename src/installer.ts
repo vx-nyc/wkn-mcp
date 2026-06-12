@@ -314,7 +314,7 @@ function openClawModelAuthMissing(status: number, modelOutput: string): boolean 
   return /Missing auth|effective=missing|status=missing/i.test(modelOutput);
 }
 
-function hasHostedUrl(content: string): boolean {
+function hasSelectedMcpUrl(content: string): boolean {
   return content.includes(VX_MCP_URL);
 }
 
@@ -443,17 +443,17 @@ function hermesDockerReadiness(deps: InstallerDeps): Pick<ClientReadiness, "stat
     },
   );
   const listOutput = `${list?.stdout ?? ""}\n${list?.stderr ?? ""}`.trim();
-  if (!list || list.status !== 0 || !hasHostedUrl(listOutput)) {
+  if (!list || list.status !== 0 || !hasSelectedMcpUrl(listOutput)) {
     return {
       status: "needs-install",
       notes: [
         ...notes,
-        "Hermes is running in Docker, but its in-container MCP config does not list the hosted VX endpoint.",
+        "Hermes is running in Docker, but its in-container MCP config does not list the selected VX MCP endpoint.",
         "Run `vx-mcp install hermes` against the Hermes home used by the container, or add VX from Hermes with `hermes mcp add`.",
       ],
     };
   }
-  notes.push("Hermes Docker MCP config lists the hosted VX endpoint.");
+  notes.push("Hermes Docker MCP config lists the selected VX MCP endpoint.");
 
   const test = deps.spawnSync(
     "docker",
@@ -515,7 +515,7 @@ function hermesRuntimeReadiness(deps: InstallerDeps): Pick<ClientReadiness, "sta
     return {
       status: "manual-approval",
       notes: [
-        "Hermes config points at the hosted VX endpoint, but no Hermes executable was found on PATH or at ~/.hermes/bin/tirith.",
+        "Hermes config points at the selected VX MCP endpoint, but no Hermes executable was found on PATH or at ~/.hermes/bin/tirith.",
         "Launch or reinstall Hermes Agent, then rerun vx-mcp doctor.",
       ],
     };
@@ -530,7 +530,7 @@ function hermesRuntimeReadiness(deps: InstallerDeps): Pick<ClientReadiness, "sta
     return {
       status: "ready",
       notes: [
-        "Hermes config points at the hosted VX endpoint and the local Hermes runtime is executable.",
+        "Hermes config points at the selected VX MCP endpoint and the local Hermes runtime is executable.",
         "Restart Hermes Agent if it was already running before this install.",
       ],
     };
@@ -554,7 +554,7 @@ function hermesRuntimeReadiness(deps: InstallerDeps): Pick<ClientReadiness, "sta
   return {
     status: "runtime-error",
     notes: [
-      `Hermes config points at the hosted VX endpoint, but the local runtime could not start: ${output || `exit ${result.status ?? "unknown"}`}`,
+      `Hermes config points at the selected VX MCP endpoint, but the local runtime could not start: ${output || `exit ${result.status ?? "unknown"}`}`,
       ...(formatNote ? [formatNote] : []),
       "Reinstall or relaunch Hermes Agent with a build compatible with this machine, then rerun vx-mcp doctor.",
     ],
@@ -1148,13 +1148,13 @@ function hermesNativeSmokeReadiness(
     return {
       status: "runtime-error",
       notes: [
-        `Hermes config points at the hosted VX endpoint, but the local runtime could not start: ${versionOutput || `exit ${version.status ?? "unknown"}`}`,
+        `Hermes config points at the selected VX MCP endpoint, but the local runtime could not start: ${versionOutput || `exit ${version.status ?? "unknown"}`}`,
       ],
     };
   }
 
   const notes = [
-    `Hermes config points at the hosted VX endpoint and the local Hermes runtime is executable: ${firstLine(versionOutput) || "version detected"}.`,
+    `Hermes config points at the selected VX MCP endpoint and the local Hermes runtime is executable: ${firstLine(versionOutput) || "version detected"}.`,
   ];
   const test = deps.spawnSync(executable, ["mcp", "test", VX_MCP_SERVER_NAME], {
     encoding: "utf8",
@@ -1207,7 +1207,7 @@ function hermesNativeSmokeReadiness(
 function hermesSmokeReadiness(deps: InstallerDeps): Pick<ClientReadiness, "status" | "notes"> {
   const configPath = hermesConfigPath(deps);
   const content = deps.existsSync(configPath) ? readText(configPath, deps) : "";
-  if (!content.includes("mcp_servers:") || !content.includes(`${VX_MCP_SERVER_NAME}:`) || !hasHostedUrl(content)) {
+  if (!content.includes("mcp_servers:") || !content.includes(`${VX_MCP_SERVER_NAME}:`) || !hasSelectedMcpUrl(content)) {
     const docker = hermesDockerReadiness(deps);
     if (docker) return docker;
     return getClientReadiness("hermes", deps);
@@ -1589,7 +1589,7 @@ export function getClientReadiness(
           target,
           label: CLIENT_LABELS.cursor,
           status: "ready",
-          notes: ["Cursor MCP config points at the hosted VX endpoint."],
+          notes: ["Cursor MCP config points at the selected VX MCP endpoint."],
         };
       }
       return {
@@ -1602,12 +1602,12 @@ export function getClientReadiness(
     case "codex": {
       const configPath = join(codexHome(deps), "config.toml");
       const content = deps.existsSync(configPath) ? readText(configPath, deps) : "";
-      if (content.includes(`[mcp_servers.${VX_MCP_SERVER_NAME}]`) && hasHostedUrl(content)) {
+      if (content.includes(`[mcp_servers.${VX_MCP_SERVER_NAME}]`) && hasSelectedMcpUrl(content)) {
         return {
           target,
           label: CLIENT_LABELS.codex,
           status: "ready",
-          notes: ["Codex MCP config points at the hosted VX endpoint."],
+          notes: ["Codex MCP config points at the selected VX MCP endpoint."],
         };
       }
       return {
@@ -1620,6 +1620,18 @@ export function getClientReadiness(
     case "openclaw": {
       const config = openClawVxConfig(deps);
       const cli = findCli("openclaw", deps);
+      if (config && config.url !== VX_MCP_URL) {
+        return {
+          target,
+          label: CLIENT_LABELS.openclaw,
+          status: "needs-install",
+          notes: [
+            `OpenClaw MCP config includes VX at ${config.path}, but it points at ${config.url}.`,
+            `Selected VX MCP endpoint: ${VX_MCP_URL}`,
+            "Run: vx-mcp install openclaw",
+          ],
+        };
+      }
       if (config && !cli) {
         const npxReadiness = openClawProbeReadiness(config, deps);
         if (npxReadiness) {
@@ -1689,7 +1701,7 @@ export function getClientReadiness(
     case "hermes": {
       const configPath = hermesConfigPath(deps);
       const content = deps.existsSync(configPath) ? readText(configPath, deps) : "";
-      if (content.includes("mcp_servers:") && content.includes(`${VX_MCP_SERVER_NAME}:`) && hasHostedUrl(content)) {
+      if (content.includes("mcp_servers:") && content.includes(`${VX_MCP_SERVER_NAME}:`) && hasSelectedMcpUrl(content)) {
         const runtime = hermesRuntimeReadiness(deps);
         return {
           target,
