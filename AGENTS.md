@@ -81,6 +81,26 @@ openclaw.plugin.json
 4. Add tests in `test/installer.test.ts`.
 5. Update README with a section in the Quick Start.
 
+## Publishing
+
+`@vx-nyc/vx-mcp` is published to **GitHub Packages** (`https://npm.pkg.github.com`),
+not npmjs.org. Do not add npm registry tokens or npmjs publish steps.
+
+Release flow:
+
+1. Merge changes to `main`.
+2. Run `manual-package-release.yml` with a new `vX.Y.Z` tag.
+3. `publish.yml` builds, publishes to GitHub Packages with `GITHUB_TOKEN`, and
+   creates the GitHub Release.
+
+Local install for testing a published version:
+
+```bash
+npm config set @vx-nyc:registry https://npm.pkg.github.com
+export NODE_AUTH_TOKEN=$(gh auth token)
+npx @vx-nyc/vx-mcp doctor
+```
+
 Do NOT add a new env var or a way to override the URL for normal use. The
 URL is canonical; if a different endpoint is needed for a test, parameterize
 inside the function but keep the public CLI surface URL-free.

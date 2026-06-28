@@ -26,11 +26,20 @@ users should leave this unset.
 
 ## Quick start
 
-Until the first public npm publish is complete, you can run the installer from
-GitHub with the same CLI surface:
+`@vx-nyc/vx-mcp` is published on **GitHub Packages** (`npm.pkg.github.com`), not
+the public npm registry.
+
+One-time registry setup:
 
 ```bash
-npx --package github:vx-nyc/vx-mcp vx-mcp install all
+npm config set @vx-nyc:registry https://npm.pkg.github.com
+```
+
+Authenticate with a GitHub token that has `read:packages`. If you use GitHub
+CLI, this is usually enough:
+
+```bash
+export NODE_AUTH_TOKEN=$(gh auth token)
 ```
 
 ### All supported local clients
@@ -44,6 +53,15 @@ Agent in one pass. Clients that support local config files are updated directly.
 that require their own CLI are configured when the CLI is on your PATH; if a
 CLI is missing, the installer prints the exact manual command or config
 snippet to apply.
+
+### Install without GitHub Packages auth
+
+If you prefer not to configure GitHub Packages auth, install directly from the
+GitHub repo (same CLI):
+
+```bash
+npx --package github:vx-nyc/vx-mcp vx-mcp install all
+```
 
 Check readiness without changing any local config:
 
@@ -374,21 +392,9 @@ VX_MCP_URL=http://localhost:3000/mcp node dist/index.js doctor
 This package is released through `manual-package-release.yml`: merge to `main`,
 run the workflow with a new `vX.Y.Z` tag, and let it dispatch `publish.yml`.
 `publish.yml` can also be run manually with an existing tag for retries. It
-publishes `@vx-nyc/vx-mcp` to the public npm registry and creates the GitHub
-Release notes. GitHub Packages is not used for the public installer because
-the documented `npx @vx-nyc/vx-mcp ...` commands must work without a GitHub
-Packages token. See `CHANGELOG.md` for release history.
-
-Once the npm package exists and has trusted publishing configured for this
-repository workflow, `publish.yml` publishes through GitHub OIDC instead of a
-long-lived npm token. The first npm publish still needs a working bootstrap
-publish token because trusted publishing is configured on the npm package after
-that package exists. `manual-package-release.yml` checks which path applies
-before creating a tag so a broken bootstrap token cannot leave a half-created
-release. If a publish retry is needed after a tag already exists, run
+publishes `@vx-nyc/vx-mcp` to **GitHub Packages** and creates the GitHub Release
+notes. CI uses `GITHUB_TOKEN` with `packages: write`; no npmjs.org token is
+required. If a publish retry is needed after a tag already exists, run
 `publish.yml` manually with that existing tag instead of creating a new one.
-GitHub installs run the package `prepare` script, so `npx --package
-github:vx-nyc/vx-mcp vx-mcp ...` remains a temporary fallback while npm is not
-available.
 
 See `CONTRIBUTING.md` for contributor workflow and public-repo safety rules.

@@ -36,38 +36,6 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          registry-url: https://registry.npmjs.org
-
-      - name: Resolve npm publish auth mode
-        id: npm_auth
-        run: |
-          set -euo pipefail
-          if npm view @vx-nyc/vx-mcp version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
-            echo "mode=trusted" >> "$GITHUB_OUTPUT"
-            echo "Package exists on npm; publish.yml will use npm trusted publishing."
-          else
-            echo "mode=bootstrap-token" >> "$GITHUB_OUTPUT"
-            echo "Package is not on npm yet; the first publish still needs a working npm token."
-          fi
-
-      - name: Verify npm bootstrap token before tagging
-        if: steps.npm_auth.outputs.mode == 'bootstrap-token'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "::error::A working npm publish token is required for the first package publish before trusted publishing can take over."
-            exit 1
-          fi
-          if ! npm whoami >/dev/null 2>&1; then
-            echo "::error::The npm publish token is present but npm rejected it. Refresh the bootstrap token before creating a release tag."
-            exit 1
-          fi
-
       - name: Refuse duplicate tag or release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

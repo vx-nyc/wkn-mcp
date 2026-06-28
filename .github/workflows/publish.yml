@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
+      packages: write
     steps:
       - name: Resolve publish tag
         id: version
@@ -47,10 +47,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: https://registry.npmjs.org
-
-      - name: Upgrade npm for trusted publishing
-        run: npm install -g 'npm@^11.5.1'
+          registry-url: https://npm.pkg.github.com
 
       - run: npm ci
 
@@ -64,39 +61,10 @@ jobs:
 
       - run: npm run build
 
-      - name: Resolve npm publish auth mode
-        id: npm_auth
-        run: |
-          set -euo pipefail
-          if npm view @vx-nyc/vx-mcp version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
-            echo "mode=trusted" >> "$GITHUB_OUTPUT"
-            echo "Package exists on npm; publishing with GitHub OIDC trusted publishing."
-          else
-            echo "mode=bootstrap-token" >> "$GITHUB_OUTPUT"
-            echo "Package is not on npm yet; publishing with bootstrap token."
-          fi
-
-      - name: Verify npm bootstrap token
-        if: steps.npm_auth.outputs.mode == 'bootstrap-token'
+      - name: Publish to GitHub Packages
+        run: npm publish
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "::error::A working npm publish token is required for the first @vx-nyc/vx-mcp publish before trusted publishing can take over."
-            exit 1
-          fi
-          npm whoami
-
-      - name: Publish to npm with bootstrap token
-        if: steps.npm_auth.outputs.mode == 'bootstrap-token'
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish to npm with trusted publishing
-        if: steps.npm_auth.outputs.mode == 'trusted'
-        run: npm publish --access public
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: softprops/action-gh-release@v1
         with:
