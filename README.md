@@ -42,17 +42,38 @@ CLI, this is usually enough:
 export NODE_AUTH_TOKEN=$(gh auth token)
 ```
 
+### Which tools do you already have installed?
+
+```bash
+npx @vx-nyc/vx-mcp detect
+```
+
+Scans this machine for every supported client (Claude Code, Cursor, Codex,
+OpenClaw, Hermes Agent, Claude Desktop, Windsurf, Cline, Zed, and VS Code) and
+reports which ones it found — from a CLI on PATH, an installed app, or an
+existing config directory — without changing anything. Add `--json` for
+machine-readable output.
+
 ### All supported local clients
 
 ```bash
 npx @vx-nyc/vx-mcp install all
 ```
 
-This runs the installer for Claude Code, Cursor, Codex, OpenClaw, and Hermes
-Agent in one pass. Clients that support local config files are updated directly. Clients
-that require their own CLI are configured when the CLI is on your PATH; if a
-CLI is missing, the installer prints the exact manual command or config
-snippet to apply.
+This runs the installer for every supported client in one pass. Clients that
+support local config files are updated directly. Clients that require their
+own CLI are configured when the CLI is on your PATH; if a CLI is missing, the
+installer prints the exact manual command or config snippet to apply.
+
+Preview exactly what would change first, without writing anything:
+
+```bash
+npx @vx-nyc/vx-mcp install all --dry-run
+```
+
+`--dry-run` works with every `install`/`uninstall` target and prints a diff of
+the config file it would write (or "already reflects the selected VX MCP
+endpoint" if there's nothing to do).
 
 ### Install without GitHub Packages auth
 
@@ -69,10 +90,12 @@ Check readiness without changing any local config:
 npx @vx-nyc/vx-mcp doctor
 ```
 
-The doctor reports local config status for Claude Code, Cursor, Codex,
-OpenClaw, Hermes Agent, and the manual ChatGPT remote-MCP setup path. When a
-local runtime is discoverable, it also verifies that the runtime can start so a
-config-only install is not mistaken for a working agent instance.
+The doctor reports local config status for every supported client and the
+manual ChatGPT remote-MCP setup path. When a local runtime is discoverable, it
+also verifies that the runtime can start so a config-only install is not
+mistaken for a working agent instance. Because it re-reads each client's live
+config on every run, it also notices when a client update wiped out the VX
+entry — rerunning `install` fixes that the same way it did the first time.
 
 ### Claude Code
 
@@ -125,6 +148,139 @@ Manual equivalent — add this to `~/.codex/config.toml`:
 [mcp_servers.vx]
 url = "https://api.onememory.co/mcp"
 transport = "streamable_http"
+```
+
+### Claude Desktop
+
+```bash
+npx @vx-nyc/vx-mcp install claude-desktop
+```
+
+Config path: macOS `~/Library/Application Support/Claude/claude_desktop_config.json`,
+Windows `%APPDATA%\Claude\claude_desktop_config.json`. (Claude Desktop has no
+Linux build.)
+
+Claude Desktop's config only understands local (stdio) MCP servers — it has no
+built-in remote-HTTP/OAuth transport. This installer writes an entry that runs
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote) via `npx`, the
+community-standard bridge that speaks stdio to Claude Desktop and Streamable
+HTTP to the hosted VX endpoint, opening your browser for OAuth on first use.
+vx-mcp itself never sees or stores a credential.
+
+Manual equivalent — add this block to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "vx": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://api.onememory.co/mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop after installing.
+
+### Windsurf
+
+```bash
+npx @vx-nyc/vx-mcp install windsurf
+```
+
+This writes the VX entry to `~/.codeium/windsurf/mcp_config.json` (same path
+on macOS, Linux, and Windows). Windsurf's Cascade agent will open your browser
+to sign in on first use.
+
+Manual equivalent:
+
+```json
+{
+  "mcpServers": {
+    "vx": {
+      "serverUrl": "https://api.onememory.co/mcp"
+    }
+  }
+}
+```
+
+### Cline
+
+```bash
+npx @vx-nyc/vx-mcp install cline
+```
+
+Config path: macOS
+`~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`,
+Windows `%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json`,
+Linux `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`.
+This targets the standard VS Code install of the Cline extension; Cline
+running inside VS Code Insiders, Cursor, or a portable profile uses a
+different path and needs manual setup.
+
+Manual equivalent:
+
+```json
+{
+  "mcpServers": {
+    "vx": {
+      "type": "streamableHttp",
+      "url": "https://api.onememory.co/mcp"
+    }
+  }
+}
+```
+
+### Zed
+
+```bash
+npx @vx-nyc/vx-mcp install zed
+```
+
+Config path: macOS/Linux `~/.config/zed/settings.json` (respects
+`$XDG_CONFIG_HOME`), Windows `%APPDATA%\Zed\settings.json`. Zed already
+prompts its own OAuth flow for a remote context server with no `Authorization`
+header configured, so no extra sign-in step is needed beyond approving it in
+Zed.
+
+Manual equivalent — add this under `context_servers` in `settings.json`:
+
+```json
+{
+  "context_servers": {
+    "vx": {
+      "url": "https://api.onememory.co/mcp"
+    }
+  }
+}
+```
+
+If your `settings.json` uses `//` comments, the installer leaves it untouched
+rather than risk corrupting it — it prints this snippet for you to paste in by
+hand instead.
+
+### VS Code + Copilot
+
+```bash
+npx @vx-nyc/vx-mcp install vscode
+```
+
+Config path: macOS `~/Library/Application Support/Code/User/mcp.json`,
+Windows `%APPDATA%\Code\User\mcp.json`, Linux `~/.config/Code/User/mcp.json`.
+This is VS Code's native MCP config, shared by GitHub Copilot Chat's agent
+mode — there's no separate Copilot-only config to write.
+
+Manual equivalent — note the top-level key is `servers`, not `mcpServers`:
+
+```json
+{
+  "servers": {
+    "vx": {
+      "type": "http",
+      "url": "https://api.onememory.co/mcp"
+    }
+  }
+}
 ```
 
 ### OpenClaw
@@ -292,9 +448,16 @@ npx @vx-nyc/vx-mcp uninstall cursor
 npx @vx-nyc/vx-mcp uninstall codex
 npx @vx-nyc/vx-mcp uninstall openclaw
 npx @vx-nyc/vx-mcp uninstall hermes
+npx @vx-nyc/vx-mcp uninstall claude-desktop
+npx @vx-nyc/vx-mcp uninstall windsurf
+npx @vx-nyc/vx-mcp uninstall cline
+npx @vx-nyc/vx-mcp uninstall zed
+npx @vx-nyc/vx-mcp uninstall vscode
 ```
 
-Each command removes the entry added by the corresponding `install`.
+Each of these removes only the `vx` entry it added — every other server in
+that config file, and the file itself, is left exactly as it was. Add
+`--dry-run` to preview the removal first.
 
 ## Bundled guidance
 
@@ -349,15 +512,23 @@ tools. See your client's tool list after installation.
 ## CLI
 
 ```bash
-vx-mcp install <all|claude|cursor|codex|openclaw|hermes>
-vx-mcp uninstall <claude|cursor|codex|openclaw|hermes>
+vx-mcp install <all|claude|cursor|codex|openclaw|hermes|claude-desktop|windsurf|cline|zed|vscode> [--dry-run]
+vx-mcp uninstall <claude|cursor|codex|openclaw|hermes|claude-desktop|windsurf|cline|zed|vscode> [--dry-run]
 vx-mcp login <openclaw|hermes|all>
 vx-mcp smoke <openclaw|hermes>
 vx-mcp doctor
+vx-mcp detect [--json]
 vx-mcp clients
 vx-mcp --version
 vx-mcp --help
 ```
+
+`--dry-run` prints exactly what an `install`/`uninstall` would change — a diff
+of the config file it would write — without touching disk. `detect` reports
+which supported clients are actually present on this machine (from a CLI on
+PATH, an installed app, or an existing config directory), so a GUI can offer
+"we found N tools — connect them?" instead of a blind picklist; `--json`
+emits the same data as machine-readable JSON.
 
 ## Migrating from v0.x
 

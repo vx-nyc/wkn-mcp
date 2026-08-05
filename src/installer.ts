@@ -31,7 +31,12 @@ export type SupportedClientTarget =
   | "cursor"
   | "codex"
   | "openclaw"
-  | "hermes";
+  | "hermes"
+  | "claude-desktop"
+  | "windsurf"
+  | "cline"
+  | "zed"
+  | "vscode";
 
 export const SUPPORTED_CLIENT_TARGETS: readonly SupportedClientTarget[] = [
   "claude",
@@ -39,6 +44,11 @@ export const SUPPORTED_CLIENT_TARGETS: readonly SupportedClientTarget[] = [
   "codex",
   "openclaw",
   "hermes",
+  "claude-desktop",
+  "windsurf",
+  "cline",
+  "zed",
+  "vscode",
 ] as const;
 
 const CLIENT_LABELS: Record<SupportedClientTarget, string> = {
@@ -47,6 +57,11 @@ const CLIENT_LABELS: Record<SupportedClientTarget, string> = {
   codex: "Codex",
   openclaw: "OpenClaw",
   hermes: "Hermes Agent",
+  "claude-desktop": "Claude Desktop",
+  windsurf: "Windsurf",
+  cline: "Cline",
+  zed: "Zed",
+  vscode: "VS Code + Copilot",
 };
 
 const REQUIRED_OPENCLAW_VX_TOOLS = [
@@ -82,7 +97,8 @@ export type ReadinessStatus =
   | "needs-install"
   | "missing-cli"
   | "runtime-error"
-  | "manual-approval";
+  | "manual-approval"
+  | "unsupported";
 
 export type ClientReadiness = {
   target: SupportedClientTarget | "chatgpt";
@@ -102,6 +118,9 @@ export type InstallerDeps = {
   spawnSync: typeof spawnSync;
   homedir: typeof homedir;
   env: NodeJS.ProcessEnv;
+  /** Defaults to `process.platform`. Overridable so tests can exercise
+   *  Windows/macOS/Linux config-path logic deterministically on any host. */
+  platform: NodeJS.Platform;
 };
 
 const defaultDeps: InstallerDeps = {
@@ -115,6 +134,14 @@ const defaultDeps: InstallerDeps = {
   spawnSync,
   homedir,
   env: process.env,
+  platform: process.platform,
+};
+
+/** Options accepted by every installX/uninstallX function. */
+export type InstallOptions = {
+  /** When true, compute and describe the change but never touch disk or
+   *  run a mutating command. */
+  dryRun?: boolean;
 };
 
 function repoRootFromModule(): string {
@@ -140,9 +167,230 @@ function readJsonFile<T>(path: string, deps: InstallerDeps): T | null {
   }
 }
 
+function formatJsonFile(value: unknown): string {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
 function writeJsonFile(path: string, value: unknown, deps: InstallerDeps): void {
   ensureDir(dirname(path), deps);
-  deps.writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  deps.writeFileSync(path, formatJsonFile(value), "utf8");
+}
+
+// ---------------------------------------------------------------------------
+// Dry-run helpers
+//
+// `--dry-run` must show exactly what would change without writing anything.
+// `diffLines` is a minimal line-level diff (no LCS library dependency) that is
+// good enough for short config files; `writeOrPreview` is the single place
+// every installer routes a config-file write through so dry-run behaves
+// identically everywhere.
+// ---------------------------------------------------------------------------
+
+function diffLines(before: string, after: string): string[] {
+  const a = before.length ? before.split("\n") : [];
+  const b = after.length ? after.split("\n") : [];
+
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start]) {
+    start += 1;
+  }
+
+  let aEnd = a.length - 1;
+  let bEnd = b.length - 1;
+  while (aEnd >= start && bEnd >= start && a[aEnd] === b[bEnd]) {
+    aEnd -= 1;
+    bEnd -= 1;
+  }
+
+  const lines: string[] = [];
+  for (let i = 0; i < start; i += 1) lines.push(`  ${a[i]}`);
+  for (let i = start; i <= aEnd; i += 1) lines.push(`- ${a[i]}`);
+  for (let i = start; i <= bEnd; i += 1) lines.push(`+ ${b[i]}`);
+  for (let i = aEnd + 1; i < a.length; i += 1) lines.push(`  ${a[i]}`);
+  return lines;
+}
+
+/**
+ * Route every config-file write through this so `--dry-run` is uniform:
+ * when dry-running, nothing touches disk and the note is a labeled diff;
+ * otherwise the file is written and `writeNote` describes what happened.
+ *
+ * `before` must be a representation comparable to `content`, not necessarily
+ * the raw file bytes: text/block-marker editors (Codex, Hermes) pass the raw
+ * file text since they only touch their own marked block and preserve
+ * everything else byte-for-byte, but JSON "parse, merge, re-serialize"
+ * editors (Cursor and friends) must pass the *canonically re-serialized*
+ * previous value (e.g. `current ? formatJsonFile(current) : null`) — diffing
+ * against raw bytes there would flag every formatting difference from
+ * whatever originally wrote the file (different indent width, key order,
+ * trailing commas, ...) as if the whole file were being rewritten, even
+ * when the only real change is one added entry. Skipping the write when
+ * `before === content` is also what keeps an already-correct file from being
+ * gratuitously reformatted on a repeat, no-op install.
+ */
+function writeOrPreview(
+  path: string,
+  before: string | null,
+  content: string,
+  deps: InstallerDeps,
+  dryRun: boolean,
+  writeNote: string,
+): string {
+  if (before === content) {
+    return dryRun
+      ? `[dry-run] ${path} already reflects the selected VX MCP endpoint; no changes needed.`
+      : `${path} already reflects the selected VX MCP endpoint; no changes needed.`;
+  }
+
+  if (dryRun) {
+    const header =
+      before === null ? `[dry-run] Would create ${path}:` : `[dry-run] Would update ${path}:`;
+    return [header, ...diffLines(before ?? "", content)].join("\n");
+  }
+
+  ensureDir(dirname(path), deps);
+  deps.writeFileSync(path, content, "utf8");
+  return writeNote;
+}
+
+/** Dry-run-aware wrapper for a file removal (skill files, managed-block config
+ *  files that become empty, etc). `describeChange` should describe the
+ *  non-dry-run outcome, e.g. "Removed Codex skill at <path>". */
+function removeOrPreview(
+  path: string,
+  deps: InstallerDeps,
+  dryRun: boolean,
+  describeChange: string,
+  options: { recursive?: boolean } = {},
+): string {
+  if (dryRun) {
+    return `[dry-run] Would remove ${path}`;
+  }
+  deps.rmSync(path, { recursive: options.recursive ?? false, force: true });
+  return describeChange;
+}
+
+/** Dry-run-aware wrapper for copying a bundled skill/slash-command file. */
+function copyOrPreview(
+  sourceParts: string[],
+  destination: string,
+  deps: InstallerDeps,
+  dryRun: boolean,
+  describeChange: string,
+): string {
+  if (dryRun) {
+    return `[dry-run] Would install ${destination}`;
+  }
+  copySkill(sourceParts, destination, deps);
+  return describeChange;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-platform config path helpers
+//
+// Claude Desktop, VS Code (and the Cline extension that lives inside it), and
+// Zed each pick a different base directory per OS. Cursor/Codex/Hermes/
+// OpenClaw don't need this: their config lives at a fixed dotfile path under
+// the home directory on every OS, which `homedir()` already resolves
+// correctly without branching.
+// ---------------------------------------------------------------------------
+
+function windowsAppDataDir(deps: InstallerDeps): string {
+  return deps.env.APPDATA || join(deps.homedir(), "AppData", "Roaming");
+}
+
+/**
+ * macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+ * Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+ * Claude Desktop does not ship a Linux build, so there is no path to target
+ * there — callers should treat a null return as "skip, not supported".
+ */
+function claudeDesktopConfigPath(deps: InstallerDeps): string | null {
+  if (deps.platform === "darwin") {
+    return join(
+      deps.homedir(),
+      "Library",
+      "Application Support",
+      "Claude",
+      "claude_desktop_config.json",
+    );
+  }
+  if (deps.platform === "win32") {
+    return join(windowsAppDataDir(deps), "Claude", "claude_desktop_config.json");
+  }
+  return null;
+}
+
+/**
+ * `~/.codeium/windsurf/mcp_config.json` on macOS, Linux, and Windows alike —
+ * Windsurf resolves this relative to the home directory on every OS, so no
+ * platform branching is needed (same shape as Cursor/Codex/Hermes).
+ */
+function windsurfConfigPath(deps: InstallerDeps): string {
+  return join(deps.homedir(), ".codeium", "windsurf", "mcp_config.json");
+}
+
+/**
+ * VS Code's per-user profile directory. This anchors both VS Code's own
+ * `mcp.json` and the Cline extension's `globalStorage` settings file.
+ */
+function vsCodeUserDir(deps: InstallerDeps): string | null {
+  if (deps.platform === "darwin") {
+    return join(deps.homedir(), "Library", "Application Support", "Code", "User");
+  }
+  if (deps.platform === "win32") {
+    return join(windowsAppDataDir(deps), "Code", "User");
+  }
+  if (deps.platform === "linux") {
+    return join(deps.homedir(), ".config", "Code", "User");
+  }
+  return null;
+}
+
+/**
+ * VS Code's native MCP config. GitHub Copilot Chat's agent mode in VS Code
+ * shares this same file — there is no separate Copilot-specific config to
+ * write for the in-VS-Code experience.
+ */
+function vsCodeMcpJsonPath(deps: InstallerDeps): string | null {
+  const userDir = vsCodeUserDir(deps);
+  return userDir ? join(userDir, "mcp.json") : null;
+}
+
+/**
+ * Cline (VS Code extension id `saoudrizwan.claude-dev`) keeps its own MCP
+ * config under the extension's `globalStorage` directory, separate from VS
+ * Code's `mcp.json`. This targets the standard VS Code install; Cline running
+ * inside VS Code Insiders, Cursor, or a portable profile uses a different
+ * `globalStorage` root and needs manual setup.
+ */
+function clineMcpSettingsPath(deps: InstallerDeps): string | null {
+  const userDir = vsCodeUserDir(deps);
+  return userDir
+    ? join(
+        userDir,
+        "globalStorage",
+        "saoudrizwan.claude-dev",
+        "settings",
+        "cline_mcp_settings.json",
+      )
+    : null;
+}
+
+/**
+ * macOS/Linux: `~/.config/zed/settings.json` (respects `$XDG_CONFIG_HOME`)
+ * Windows: `%APPDATA%\Zed\settings.json`
+ * Source: Zed's own `docs/src/configuring-zed.md`.
+ */
+function zedSettingsPath(deps: InstallerDeps): string | null {
+  if (deps.platform === "darwin" || deps.platform === "linux") {
+    const configHome = deps.env.XDG_CONFIG_HOME || join(deps.homedir(), ".config");
+    return join(configHome, "zed", "settings.json");
+  }
+  if (deps.platform === "win32") {
+    return join(windowsAppDataDir(deps), "Zed", "settings.json");
+  }
+  return null;
 }
 
 function copySkill(
@@ -804,6 +1052,405 @@ export function removeCursorVxEntry(
 }
 
 // ---------------------------------------------------------------------------
+// Shared JSON "server map" helpers
+//
+// Claude Desktop, Windsurf, Cline, and VS Code all store MCP servers as a
+// named map under one top-level key, differing only in the key name and the
+// shape of each entry. Zed's `context_servers` follows the same shape inside
+// a much larger settings file. These generics do the merge/remove once;
+// each client below gets a small typed wrapper so the public API still
+// matches the per-client `upsertXVxEntry`/`removeXVxEntry` convention used by
+// Cursor (see AGENTS.md "Adding a new client").
+// ---------------------------------------------------------------------------
+
+function upsertJsonServerEntry(
+  current: Record<string, unknown> | null,
+  serversKey: string,
+  serverName: string,
+  entry: Record<string, unknown>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> =
+    current && typeof current === "object" ? { ...current } : {};
+  const servers = { ...((next[serversKey] as Record<string, unknown> | undefined) ?? {}) };
+  servers[serverName] = entry;
+  next[serversKey] = servers;
+  return next;
+}
+
+function removeJsonServerEntry(
+  current: Record<string, unknown> | null,
+  serversKey: string,
+  serverName: string,
+): Record<string, unknown> {
+  const base: Record<string, unknown> =
+    current && typeof current === "object" ? { ...current } : {};
+  const servers = { ...((base[serversKey] as Record<string, unknown> | undefined) ?? {}) };
+  delete servers[serverName];
+  base[serversKey] = servers;
+  return base;
+}
+
+// --- Claude Desktop ---------------------------------------------------------
+
+export type ClaudeDesktopMcpFile = {
+  mcpServers?: Record<string, { command: string; args: string[] } | Record<string, unknown>>;
+};
+
+/**
+ * Claude Desktop's config only understands local stdio servers (`command` +
+ * `args`) — it has no native remote-HTTP/OAuth transport in the config file
+ * (remote servers there go through the separate "Custom Connectors" UI
+ * instead, which is not a local file this CLI can drive). `mcp-remote` is the
+ * community-standard stdio↔Streamable-HTTP bridge: Claude Desktop launches it
+ * locally, it speaks stdio to Claude Desktop and HTTP to the hosted VX
+ * endpoint, and it opens the browser itself for OAuth on first use. This
+ * keeps vx-mcp itself free of any runtime or stored credential, consistent
+ * with the no-stdio-fallback rule in AGENTS.md (which is about this
+ * package's own architecture, not about the bridge Claude Desktop needs to
+ * reach *any* remote MCP server).
+ */
+export function upsertClaudeDesktopVxEntry(
+  current: ClaudeDesktopMcpFile | null,
+  url: string = VX_MCP_URL,
+  serverName: string = VX_MCP_SERVER_NAME,
+): ClaudeDesktopMcpFile {
+  return upsertJsonServerEntry(current, "mcpServers", serverName, {
+    command: "npx",
+    args: ["-y", "mcp-remote", url],
+  }) as ClaudeDesktopMcpFile;
+}
+
+export function removeClaudeDesktopVxEntry(
+  current: ClaudeDesktopMcpFile | null,
+  serverName: string = VX_MCP_SERVER_NAME,
+): ClaudeDesktopMcpFile {
+  return removeJsonServerEntry(current, "mcpServers", serverName) as ClaudeDesktopMcpFile;
+}
+
+// --- Windsurf ----------------------------------------------------------------
+
+export type WindsurfMcpFile = {
+  mcpServers?: Record<string, { serverUrl: string } | Record<string, unknown>>;
+};
+
+export function upsertWindsurfVxEntry(
+  current: WindsurfMcpFile | null,
+  url: string = VX_MCP_URL,
+  serverName: string = VX_MCP_SERVER_NAME,
+): WindsurfMcpFile {
+  return upsertJsonServerEntry(current, "mcpServers", serverName, {
+    serverUrl: url,
+  }) as WindsurfMcpFile;
+}
+
+export function removeWindsurfVxEntry(
+  current: WindsurfMcpFile | null,
+  serverName: string = VX_MCP_SERVER_NAME,
+): WindsurfMcpFile {
+  return removeJsonServerEntry(current, "mcpServers", serverName) as WindsurfMcpFile;
+}
+
+// --- Cline ---------------------------------------------------------------------
+
+export type ClineMcpFile = {
+  mcpServers?: Record<string, { type: "streamableHttp"; url: string } | Record<string, unknown>>;
+};
+
+export function upsertClineVxEntry(
+  current: ClineMcpFile | null,
+  url: string = VX_MCP_URL,
+  serverName: string = VX_MCP_SERVER_NAME,
+): ClineMcpFile {
+  // Cline requires the transport type spelled exactly "streamableHttp"
+  // (camelCase, no hyphen); "streamable-http" or an omitted type silently
+  // falls back to the legacy SSE transport and 405s against a streamable-only
+  // server.
+  return upsertJsonServerEntry(current, "mcpServers", serverName, {
+    type: "streamableHttp",
+    url,
+  }) as ClineMcpFile;
+}
+
+export function removeClineVxEntry(
+  current: ClineMcpFile | null,
+  serverName: string = VX_MCP_SERVER_NAME,
+): ClineMcpFile {
+  return removeJsonServerEntry(current, "mcpServers", serverName) as ClineMcpFile;
+}
+
+// --- VS Code (+ GitHub Copilot Chat) --------------------------------------------
+
+export type VsCodeMcpFile = {
+  servers?: Record<string, { type: "http"; url: string } | Record<string, unknown>>;
+};
+
+export function upsertVsCodeVxEntry(
+  current: VsCodeMcpFile | null,
+  url: string = VX_MCP_URL,
+  serverName: string = VX_MCP_SERVER_NAME,
+): VsCodeMcpFile {
+  // Note the top-level key is `servers`, not `mcpServers` — different from
+  // every other JSON-based client here.
+  return upsertJsonServerEntry(current, "servers", serverName, {
+    type: "http",
+    url,
+  }) as VsCodeMcpFile;
+}
+
+export function removeVsCodeVxEntry(
+  current: VsCodeMcpFile | null,
+  serverName: string = VX_MCP_SERVER_NAME,
+): VsCodeMcpFile {
+  return removeJsonServerEntry(current, "servers", serverName) as VsCodeMcpFile;
+}
+
+// --- Zed -------------------------------------------------------------------------
+
+export type ZedSettingsFile = Record<string, unknown> & {
+  context_servers?: Record<string, { url: string } | Record<string, unknown>>;
+};
+
+export function upsertZedVxEntry(
+  current: ZedSettingsFile | null,
+  url: string = VX_MCP_URL,
+  serverName: string = VX_MCP_SERVER_NAME,
+): ZedSettingsFile {
+  // Zed prompts its own OAuth flow for a remote context server that has no
+  // "Authorization" header configured, so a bare `{ url }` entry is correct.
+  return upsertJsonServerEntry(current, "context_servers", serverName, {
+    url,
+  }) as ZedSettingsFile;
+}
+
+export function removeZedVxEntry(
+  current: ZedSettingsFile | null,
+  serverName: string = VX_MCP_SERVER_NAME,
+): ZedSettingsFile {
+  return removeJsonServerEntry(current, "context_servers", serverName) as ZedSettingsFile;
+}
+
+// --- Generic install/uninstall engine for the JSON "server map" clients ------
+
+type JsonMcpClientSpec<TFile> = {
+  label: string;
+  resolvePath: (deps: InstallerDeps) => string | null;
+  unsupportedNote: string;
+  upsert: (current: TFile | null) => TFile;
+  remove: (current: TFile | null) => TFile;
+  afterInstallNotes: string[];
+};
+
+function installJsonMcpClient<TFile>(
+  spec: JsonMcpClientSpec<TFile>,
+  deps: InstallerDeps,
+  options: InstallOptions,
+): string[] {
+  const notes: string[] = [];
+  const path = spec.resolvePath(deps);
+  if (!path) {
+    notes.push(spec.unsupportedNote);
+    return notes;
+  }
+
+  const dryRun = options.dryRun ?? false;
+  const raw = deps.existsSync(path) ? readText(path, deps).trim() : "";
+  const current = raw ? readJsonFile<TFile>(path, deps) : null;
+  if (raw && current === null) {
+    notes.push(
+      `${path} exists but could not be parsed as JSON; leaving it untouched to avoid corrupting it. Add this entry by hand instead:`,
+    );
+    notes.push(formatJsonFile(spec.upsert(null)));
+    return notes;
+  }
+
+  const next = spec.upsert(current);
+  const before = current === null ? null : formatJsonFile(current);
+  notes.push(
+    writeOrPreview(
+      path,
+      before,
+      formatJsonFile(next),
+      deps,
+      dryRun,
+      `Wrote ${spec.label} MCP config at ${path}`,
+    ),
+  );
+  notes.push(...spec.afterInstallNotes);
+  return notes;
+}
+
+function uninstallJsonMcpClient<TFile>(
+  spec: JsonMcpClientSpec<TFile>,
+  deps: InstallerDeps,
+  options: InstallOptions,
+): string[] {
+  const notes: string[] = [];
+  const path = spec.resolvePath(deps);
+  if (!path) {
+    notes.push(spec.unsupportedNote);
+    return notes;
+  }
+
+  const dryRun = options.dryRun ?? false;
+  if (!deps.existsSync(path)) {
+    notes.push(`No ${spec.label} config found at ${path}; nothing to remove.`);
+    return notes;
+  }
+
+  const current = readJsonFile<TFile>(path, deps);
+  if (current === null) {
+    notes.push(
+      `${path} could not be parsed as JSON; leaving it untouched. Remove the "${VX_MCP_SERVER_NAME}" entry by hand.`,
+    );
+    return notes;
+  }
+
+  const next = spec.remove(current);
+  notes.push(
+    writeOrPreview(
+      path,
+      formatJsonFile(current),
+      formatJsonFile(next),
+      deps,
+      dryRun,
+      `Removed the VX entry from ${path}`,
+    ),
+  );
+  return notes;
+}
+
+const claudeDesktopSpec: JsonMcpClientSpec<ClaudeDesktopMcpFile> = {
+  label: "Claude Desktop",
+  resolvePath: claudeDesktopConfigPath,
+  unsupportedNote:
+    "Claude Desktop's config location is only confidently known for macOS and Windows; skipping on this platform (Claude Desktop has no Linux build).",
+  upsert: (current) => upsertClaudeDesktopVxEntry(current),
+  remove: (current) => removeClaudeDesktopVxEntry(current),
+  afterInstallNotes: [
+    `Claude Desktop only supports local (stdio) MCP servers, so this entry runs the \`mcp-remote\` bridge (via npx) to reach ${VX_MCP_URL} over Streamable HTTP.`,
+    "Restart Claude Desktop; on first VX tool call, mcp-remote opens your browser to sign in via OAuth. vx-mcp itself never sees or stores a credential.",
+  ],
+};
+
+const windsurfSpec: JsonMcpClientSpec<WindsurfMcpFile> = {
+  label: "Windsurf",
+  resolvePath: (deps) => windsurfConfigPath(deps),
+  unsupportedNote: "Windsurf's config location could not be determined on this platform; skipping.",
+  upsert: (current) => upsertWindsurfVxEntry(current),
+  remove: (current) => removeWindsurfVxEntry(current),
+  afterInstallNotes: [
+    "Restart Windsurf (or reload the Cascade panel); it will open your browser to sign in via OAuth on first VX tool use.",
+  ],
+};
+
+const clineSpec: JsonMcpClientSpec<ClineMcpFile> = {
+  label: "Cline",
+  resolvePath: clineMcpSettingsPath,
+  unsupportedNote:
+    "Cline's settings path is derived from VS Code's per-user profile directory, which could not be determined on this platform; skipping.",
+  upsert: (current) => upsertClineVxEntry(current),
+  remove: (current) => removeClineVxEntry(current),
+  afterInstallNotes: [
+    "Reload VS Code (or the Cline panel); it will open your browser to sign in via OAuth on first VX tool use.",
+    "This targets the standard VS Code install of the Cline extension. Cline running inside VS Code Insiders, Cursor, or a portable profile uses a different globalStorage path and needs manual setup.",
+  ],
+};
+
+const vsCodeSpec: JsonMcpClientSpec<VsCodeMcpFile> = {
+  label: "VS Code",
+  resolvePath: vsCodeMcpJsonPath,
+  unsupportedNote:
+    "VS Code's per-user config directory could not be determined on this platform; skipping.",
+  upsert: (current) => upsertVsCodeVxEntry(current),
+  remove: (current) => removeVsCodeVxEntry(current),
+  afterInstallNotes: [
+    "This is VS Code's native MCP config, shared by GitHub Copilot Chat's agent mode — no separate Copilot-only config is needed.",
+    "Reload VS Code; it will open your browser to sign in via OAuth on first VX tool use.",
+  ],
+};
+
+const zedSpec: JsonMcpClientSpec<ZedSettingsFile> = {
+  label: "Zed",
+  resolvePath: zedSettingsPath,
+  unsupportedNote: "Zed's settings location could not be determined on this platform; skipping.",
+  upsert: (current) => upsertZedVxEntry(current),
+  remove: (current) => removeZedVxEntry(current),
+  afterInstallNotes: [
+    "Zed runs its own OAuth flow the first time it calls a VX tool, since no Authorization header is configured.",
+  ],
+};
+
+export function installClaudeDesktop(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
+  return installJsonMcpClient(claudeDesktopSpec, deps, options);
+}
+
+export function uninstallClaudeDesktop(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
+  return uninstallJsonMcpClient(claudeDesktopSpec, deps, options);
+}
+
+export function installWindsurf(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
+  return installJsonMcpClient(windsurfSpec, deps, options);
+}
+
+export function uninstallWindsurf(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
+  return uninstallJsonMcpClient(windsurfSpec, deps, options);
+}
+
+export function installCline(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
+  return installJsonMcpClient(clineSpec, deps, options);
+}
+
+export function uninstallCline(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
+  return uninstallJsonMcpClient(clineSpec, deps, options);
+}
+
+export function installVsCode(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
+  return installJsonMcpClient(vsCodeSpec, deps, options);
+}
+
+export function uninstallVsCode(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
+  return uninstallJsonMcpClient(vsCodeSpec, deps, options);
+}
+
+export function installZed(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
+  return installJsonMcpClient(zedSpec, deps, options);
+}
+
+export function uninstallZed(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
+  return uninstallJsonMcpClient(zedSpec, deps, options);
+}
+
+// ---------------------------------------------------------------------------
 // Claude Code installer
 // ---------------------------------------------------------------------------
 
@@ -817,14 +1464,24 @@ export function removeCursorVxEntry(
  * Fallback (no `claude` CLI on PATH): the user gets a printable command and a
  * note pointing at the docs. The slash command is still copied.
  */
-export function installClaude(deps: InstallerDeps = defaultDeps): string[] {
+export function installClaude(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
   const notes: string[] = [];
+  const dryRun = options.dryRun ?? false;
 
   const claudeCommandsDir = join(deps.homedir(), ".claude", "commands");
   const commandPath = join(claudeCommandsDir, "vx-memory.md");
-  ensureDir(claudeCommandsDir, deps);
-  copySkill(["skills", "claude", "vx-memory", "vx-memory.md"], commandPath, deps);
-  notes.push(`Installed Claude Code slash command at ${commandPath}`);
+  notes.push(
+    copyOrPreview(
+      ["skills", "claude", "vx-memory", "vx-memory.md"],
+      commandPath,
+      deps,
+      dryRun,
+      `Installed Claude Code slash command at ${commandPath}`,
+    ),
+  );
 
   const claudeCli = findCli("claude", deps);
   if (!claudeCli) {
@@ -836,6 +1493,16 @@ export function installClaude(deps: InstallerDeps = defaultDeps): string[] {
     );
     notes.push(
       "Claude Code will open your browser to sign in via OAuth on first use.",
+    );
+    return notes;
+  }
+
+  if (dryRun) {
+    notes.push(
+      `[dry-run] Would run: claude mcp remove --scope user ${VX_MCP_SERVER_NAME} (pre-flight cleanup, ignoring errors)`,
+    );
+    notes.push(
+      `[dry-run] Would run: claude mcp add --scope user --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}`,
     );
     return notes;
   }
@@ -884,16 +1551,30 @@ export function installClaude(deps: InstallerDeps = defaultDeps): string[] {
   return notes;
 }
 
-export function uninstallClaude(deps: InstallerDeps = defaultDeps): string[] {
+export function uninstallClaude(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
   const notes: string[] = [];
+  const dryRun = options.dryRun ?? false;
   const commandPath = join(deps.homedir(), ".claude", "commands", "vx-memory.md");
   if (deps.existsSync(commandPath)) {
-    deps.rmSync(commandPath);
-    notes.push(`Removed Claude Code slash command at ${commandPath}`);
+    notes.push(
+      removeOrPreview(
+        commandPath,
+        deps,
+        dryRun,
+        `Removed Claude Code slash command at ${commandPath}`,
+      ),
+    );
   }
 
   const claudeCli = findCli("claude", deps);
   if (claudeCli) {
+    if (dryRun) {
+      notes.push(`[dry-run] Would run: claude mcp remove --scope user ${VX_MCP_SERVER_NAME}`);
+      return notes;
+    }
     const removeResult = deps.spawnSync(
       claudeCli,
       ["mcp", "remove", "--scope", "user", VX_MCP_SERVER_NAME],
@@ -925,20 +1606,34 @@ function cursorMcpJsonPath(deps: InstallerDeps): string {
   return join(deps.homedir(), ".cursor", "mcp.json");
 }
 
-export function installCursor(deps: InstallerDeps = defaultDeps): string[] {
+export function installCursor(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
   const notes: string[] = [];
   const path = cursorMcpJsonPath(deps);
   const current = readJsonFile<CursorMcpFile>(path, deps);
   const next = upsertCursorVxEntry(current);
-  writeJsonFile(path, next, deps);
-  notes.push(`Wrote Cursor MCP config at ${path}`);
+  notes.push(
+    writeOrPreview(
+      path,
+      current === null ? null : formatJsonFile(current),
+      formatJsonFile(next),
+      deps,
+      options.dryRun ?? false,
+      `Wrote Cursor MCP config at ${path}`,
+    ),
+  );
   notes.push(
     "Restart Cursor; it will open your browser to sign in via OAuth on first VX tool use.",
   );
   return notes;
 }
 
-export function uninstallCursor(deps: InstallerDeps = defaultDeps): string[] {
+export function uninstallCursor(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
   const notes: string[] = [];
   const path = cursorMcpJsonPath(deps);
   const current = readJsonFile<CursorMcpFile>(path, deps);
@@ -947,8 +1642,16 @@ export function uninstallCursor(deps: InstallerDeps = defaultDeps): string[] {
     return notes;
   }
   const next = removeCursorVxEntry(current);
-  writeJsonFile(path, next, deps);
-  notes.push(`Removed the VX entry from ${path}`);
+  notes.push(
+    writeOrPreview(
+      path,
+      formatJsonFile(current),
+      formatJsonFile(next),
+      deps,
+      options.dryRun ?? false,
+      `Removed the VX entry from ${path}`,
+    ),
+  );
   return notes;
 }
 
@@ -960,43 +1663,76 @@ function codexHome(deps: InstallerDeps): string {
   return deps.env.CODEX_HOME || join(deps.homedir(), ".codex");
 }
 
-export function installCodex(deps: InstallerDeps = defaultDeps): string[] {
+export function installCodex(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
   const notes: string[] = [];
+  const dryRun = options.dryRun ?? false;
   const home = codexHome(deps);
 
   const skillsDir = join(home, "skills", "vx-memory");
   const skillPath = join(skillsDir, "SKILL.md");
-  ensureDir(skillsDir, deps);
-  copySkill(["skills", "codex", "vx-memory", "SKILL.md"], skillPath, deps);
-  notes.push(`Installed Codex skill at ${skillPath}`);
+  notes.push(
+    copyOrPreview(
+      ["skills", "codex", "vx-memory", "SKILL.md"],
+      skillPath,
+      deps,
+      dryRun,
+      `Installed Codex skill at ${skillPath}`,
+    ),
+  );
 
   const configPath = join(home, "config.toml");
-  const current = deps.existsSync(configPath) ? readText(configPath, deps) : "";
-  const updated = upsertCodexManagedBlock(current, buildCodexTomlBlock());
-  ensureDir(dirname(configPath), deps);
-  deps.writeFileSync(configPath, updated, "utf8");
-  notes.push(`Updated Codex MCP config at ${configPath}`);
+  const before = deps.existsSync(configPath) ? readText(configPath, deps) : null;
+  const updated = upsertCodexManagedBlock(before ?? "", buildCodexTomlBlock());
+  notes.push(
+    writeOrPreview(
+      configPath,
+      before,
+      updated,
+      deps,
+      dryRun,
+      `Updated Codex MCP config at ${configPath}`,
+    ),
+  );
   notes.push(
     "Restart Codex; it will open your browser to sign in via OAuth on first VX tool use.",
   );
   return notes;
 }
 
-export function uninstallCodex(deps: InstallerDeps = defaultDeps): string[] {
+export function uninstallCodex(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
   const notes: string[] = [];
+  const dryRun = options.dryRun ?? false;
   const home = codexHome(deps);
 
   const skillDir = join(home, "skills", "vx-memory");
   if (deps.existsSync(skillDir)) {
-    deps.rmSync(skillDir, { recursive: true, force: true });
-    notes.push(`Removed Codex skill at ${skillDir}`);
+    notes.push(
+      removeOrPreview(skillDir, deps, dryRun, `Removed Codex skill at ${skillDir}`, {
+        recursive: true,
+      }),
+    );
   }
 
   const configPath = join(home, "config.toml");
   if (deps.existsSync(configPath)) {
-    const stripped = stripCodexManagedBlock(readText(configPath, deps));
-    deps.writeFileSync(configPath, stripped ? `${stripped}\n` : "", "utf8");
-    notes.push(`Removed VX MCP configuration from ${configPath}`);
+    const before = readText(configPath, deps);
+    const stripped = stripCodexManagedBlock(before);
+    notes.push(
+      writeOrPreview(
+        configPath,
+        before,
+        stripped ? `${stripped}\n` : "",
+        deps,
+        dryRun,
+        `Removed VX MCP configuration from ${configPath}`,
+      ),
+    );
   }
   return notes;
 }
@@ -1101,22 +1837,39 @@ export function upsertHermesManagedBlock(
   return `${nextLines.join("\n").trimEnd()}\n`;
 }
 
-export function installHermes(deps: InstallerDeps = defaultDeps): string[] {
+export function installHermes(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
   const notes: string[] = [];
+  const dryRun = options.dryRun ?? false;
   const home = hermesHome(deps);
 
   const skillDir = join(home, "skills", "vx-memory");
   const skillPath = join(skillDir, "SKILL.md");
-  ensureDir(skillDir, deps);
-  copySkill(["skills", "hermes", "vx-memory", "SKILL.md"], skillPath, deps);
-  notes.push(`Installed Hermes skill at ${skillPath}`);
+  notes.push(
+    copyOrPreview(
+      ["skills", "hermes", "vx-memory", "SKILL.md"],
+      skillPath,
+      deps,
+      dryRun,
+      `Installed Hermes skill at ${skillPath}`,
+    ),
+  );
 
   const configPath = hermesConfigPath(deps);
-  const current = deps.existsSync(configPath) ? readText(configPath, deps) : "";
-  const updated = upsertHermesManagedBlock(current);
-  ensureDir(dirname(configPath), deps);
-  deps.writeFileSync(configPath, updated, "utf8");
-  notes.push(`Updated Hermes MCP config at ${configPath}`);
+  const before = deps.existsSync(configPath) ? readText(configPath, deps) : null;
+  const updated = upsertHermesManagedBlock(before ?? "");
+  notes.push(
+    writeOrPreview(
+      configPath,
+      before,
+      updated,
+      deps,
+      dryRun,
+      `Updated Hermes MCP config at ${configPath}`,
+    ),
+  );
   notes.push(
     "Restart Hermes Agent; it will discover VX MCP tools on startup and open your browser to sign in via OAuth on first VX tool use.",
   );
@@ -1515,21 +2268,37 @@ function smokeHermesSucceeded(notes: string[]): boolean {
   return notes.some((note) => note.includes("Hermes VX smoke ready"));
 }
 
-export function uninstallHermes(deps: InstallerDeps = defaultDeps): string[] {
+export function uninstallHermes(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
   const notes: string[] = [];
+  const dryRun = options.dryRun ?? false;
   const home = hermesHome(deps);
 
   const skillDir = join(home, "skills", "vx-memory");
   if (deps.existsSync(skillDir)) {
-    deps.rmSync(skillDir, { recursive: true, force: true });
-    notes.push(`Removed Hermes skill at ${skillDir}`);
+    notes.push(
+      removeOrPreview(skillDir, deps, dryRun, `Removed Hermes skill at ${skillDir}`, {
+        recursive: true,
+      }),
+    );
   }
 
   const configPath = hermesConfigPath(deps);
   if (deps.existsSync(configPath)) {
-    const stripped = stripHermesManagedBlock(readText(configPath, deps));
-    deps.writeFileSync(configPath, stripped ? `${stripped}\n` : "", "utf8");
-    notes.push(`Removed VX MCP configuration from ${configPath}`);
+    const before = readText(configPath, deps);
+    const stripped = stripHermesManagedBlock(before);
+    notes.push(
+      writeOrPreview(
+        configPath,
+        before,
+        stripped ? `${stripped}\n` : "",
+        deps,
+        dryRun,
+        `Removed VX MCP configuration from ${configPath}`,
+      ),
+    );
   } else {
     notes.push(`No Hermes config found at ${configPath}; nothing to remove.`);
   }
@@ -1641,8 +2410,12 @@ export function buildOpenClawPluginConfig(
   };
 }
 
-export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
+export function installOpenClaw(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
   const notes: string[] = [];
+  const dryRun = options.dryRun ?? false;
   const snippet = JSON.stringify(buildOpenClawPluginConfig(), null, 2);
 
   const openclawCli = findCli("openclaw", deps);
@@ -1653,6 +2426,18 @@ export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
         notes.push(
           "OpenClaw config was found, but `npx` was not found on PATH for automatic setup.",
         );
+      } else if (dryRun) {
+        const profileArgs = openClawInstallProfileArgs(deps);
+        notes.push(
+          `[dry-run] Would run: ${openClawCommand(openClawMcpAddArgs(profileArgs))}`,
+        );
+        notes.push(
+          "[dry-run] Would run: openclaw config patch --stdin to enable plugin tools and compact tool search.",
+        );
+        notes.push(
+          `[dry-run] Would print the login command: ${openClawCommand([...profileArgs, "mcp", "login", VX_MCP_SERVER_NAME])}`,
+        );
+        return notes;
       } else {
         const profileArgs = openClawInstallProfileArgs(deps);
         const addArgs = ["-y", "openclaw", ...openClawMcpAddArgs(profileArgs)];
@@ -1700,6 +2485,19 @@ export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
       `OpenClaw CLI (\`openclaw\`) was not found on PATH. Install OpenClaw, then run:`,
     );
     notes.push(`  openclaw plugins install ${VX_PACKAGE_NAME}`);
+    notes.push("Add this to your OpenClaw plugin config:");
+    notes.push(snippet);
+    return notes;
+  }
+
+  if (dryRun) {
+    notes.push(`[dry-run] Would run: openclaw plugins install ${VX_PACKAGE_NAME}`);
+    notes.push(
+      `[dry-run] Would run: openclaw mcp tools ${VX_MCP_SERVER_NAME} --include ${RECOMMENDED_OPENCLAW_VX_TOOLS.join(",")}`,
+    );
+    notes.push(
+      "[dry-run] Would run: openclaw config patch --stdin to enable plugin tools and compact tool search.",
+    );
     notes.push("Add this to your OpenClaw plugin config:");
     notes.push(snippet);
     return notes;
@@ -1774,13 +2572,20 @@ export function installOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
   return notes;
 }
 
-export function uninstallOpenClaw(deps: InstallerDeps = defaultDeps): string[] {
+export function uninstallOpenClaw(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
   const notes: string[] = [];
   const openclawCli = findCli("openclaw", deps);
   if (!openclawCli) {
     notes.push(
       `OpenClaw CLI (\`openclaw\`) was not found on PATH. Remove the plugin manually with \`openclaw plugins remove ${VX_PACKAGE_NAME}\`.`,
     );
+    return notes;
+  }
+  if (options.dryRun) {
+    notes.push(`[dry-run] Would run: openclaw plugins remove ${VX_PACKAGE_NAME}`);
     return notes;
   }
   const result = deps.spawnSync(
@@ -1814,8 +2619,51 @@ function readinessLine(item: ClientReadiness): string {
           ? "missing-cli"
           : item.status === "runtime-error"
             ? "runtime-error"
-            : "needs-install";
+            : item.status === "unsupported"
+              ? "unsupported"
+              : "needs-install";
   return `${item.label}: ${icon}`;
+}
+
+/**
+ * Shared readiness check for the JSON "server map" clients: `ready` when the
+ * live config file already contains a vx entry pointing at the selected VX
+ * MCP endpoint, `unsupported` when this platform's config path is unknown,
+ * `needs-install` otherwise. Re-reads the file on every call (no caching), so
+ * it notices when a client's own auto-update wiped the entry out from under
+ * us.
+ */
+function jsonMcpClientReadiness<TFile>(
+  target: SupportedClientTarget,
+  spec: Pick<JsonMcpClientSpec<TFile>, "resolvePath" | "unsupportedNote">,
+  serversKey: string,
+  deps: InstallerDeps,
+): ClientReadiness {
+  const label = CLIENT_LABELS[target];
+  const path = spec.resolvePath(deps);
+  if (!path) {
+    return { target, label, status: "unsupported", notes: [spec.unsupportedNote] };
+  }
+
+  const current = readJsonFile<Record<string, unknown>>(path, deps);
+  const servers = current?.[serversKey] as Record<string, unknown> | undefined;
+  const entry = servers?.[VX_MCP_SERVER_NAME];
+  const entryJson = entry ? JSON.stringify(entry) : "";
+  if (entry && entryJson.includes(VX_MCP_URL)) {
+    return {
+      target,
+      label,
+      status: "ready",
+      notes: [`${label} MCP config at ${path} points at the selected VX MCP endpoint.`],
+    };
+  }
+
+  return {
+    target,
+    label,
+    status: "needs-install",
+    notes: [`Run: vx-mcp install ${target}`],
+  };
 }
 
 export function getClientReadiness(
@@ -2003,6 +2851,16 @@ export function getClientReadiness(
         notes: [`Run: vx-mcp install hermes`],
       };
     }
+    case "claude-desktop":
+      return jsonMcpClientReadiness(target, claudeDesktopSpec, "mcpServers", deps);
+    case "windsurf":
+      return jsonMcpClientReadiness(target, windsurfSpec, "mcpServers", deps);
+    case "cline":
+      return jsonMcpClientReadiness(target, clineSpec, "mcpServers", deps);
+    case "vscode":
+      return jsonMcpClientReadiness(target, vsCodeSpec, "servers", deps);
+    case "zed":
+      return jsonMcpClientReadiness(target, zedSpec, "context_servers", deps);
     case "chatgpt":
       return {
         target,
@@ -2039,14 +2897,154 @@ export function doctor(deps: InstallerDeps = defaultDeps): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Detection — which supported AI tools are actually installed on this
+// machine, independent of whether VX is configured for them yet. Meant for
+// a GUI (vx-mac-app) to offer "we found N tools — connect them?" instead of
+// making the user pick blind from a list.
+// ---------------------------------------------------------------------------
+
+export type ClientDetection = {
+  target: SupportedClientTarget;
+  label: string;
+  installed: boolean;
+  evidence: string[];
+};
+
+type DetectionSignal = { evidence: string };
+
+function detectByCli(binary: string, deps: InstallerDeps): DetectionSignal | null {
+  const path = findCli(binary, deps);
+  return path ? { evidence: `\`${binary}\` CLI found on PATH (${path})` } : null;
+}
+
+function detectByPath(
+  path: string | null,
+  deps: InstallerDeps,
+  label: string,
+): DetectionSignal | null {
+  return path && deps.existsSync(path) ? { evidence: `Found ${label} at ${path}` } : null;
+}
+
+/** Only meaningful on macOS, where installed apps live under /Applications
+ *  with a predictable bundle name. There is no equivalently reliable,
+ *  install-location-independent signal for Windows or Linux app bundles. */
+function macAppBundlePath(deps: InstallerDeps, appName: string): string | null {
+  return deps.platform === "darwin" ? join("/Applications", `${appName}.app`) : null;
+}
+
+function detectClient(target: SupportedClientTarget, deps: InstallerDeps): ClientDetection {
+  const label = CLIENT_LABELS[target];
+  const signals: DetectionSignal[] = [];
+  const add = (signal: DetectionSignal | null) => {
+    if (signal) signals.push(signal);
+  };
+
+  switch (target) {
+    case "claude":
+      add(detectByCli("claude", deps));
+      add(detectByPath(join(deps.homedir(), ".claude"), deps, "~/.claude"));
+      break;
+    case "cursor":
+      add(detectByPath(macAppBundlePath(deps, "Cursor"), deps, "Cursor.app"));
+      add(detectByPath(join(deps.homedir(), ".cursor"), deps, "~/.cursor"));
+      break;
+    case "codex":
+      add(detectByCli("codex", deps));
+      add(detectByPath(codexHome(deps), deps, "the Codex home directory"));
+      break;
+    case "openclaw":
+      add(detectByCli("openclaw", deps));
+      for (const candidate of openClawConfigPathCandidates(deps)) {
+        add(detectByPath(candidate, deps, candidate));
+      }
+      break;
+    case "hermes": {
+      const executable = hermesExecutableCandidate(deps);
+      if (executable) add({ evidence: `Hermes executable found at ${executable}` });
+      add(detectByPath(hermesHome(deps), deps, "~/.hermes"));
+      break;
+    }
+    case "claude-desktop": {
+      add(detectByPath(macAppBundlePath(deps, "Claude"), deps, "Claude.app"));
+      const configPath = claudeDesktopConfigPath(deps);
+      add(
+        detectByPath(
+          configPath ? dirname(configPath) : null,
+          deps,
+          "the Claude Desktop config directory",
+        ),
+      );
+      break;
+    }
+    case "windsurf":
+      add(detectByPath(macAppBundlePath(deps, "Windsurf"), deps, "Windsurf.app"));
+      add(detectByPath(dirname(windsurfConfigPath(deps)), deps, "~/.codeium/windsurf"));
+      break;
+    case "cline": {
+      const path = clineMcpSettingsPath(deps);
+      // .../globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
+      // -> .../globalStorage/saoudrizwan.claude-dev
+      const extensionDir = path ? dirname(dirname(path)) : null;
+      add(detectByPath(extensionDir, deps, "the Cline extension's globalStorage directory"));
+      break;
+    }
+    case "vscode":
+      add(detectByCli("code", deps));
+      add(detectByPath(macAppBundlePath(deps, "Visual Studio Code"), deps, "Visual Studio Code.app"));
+      add(detectByPath(vsCodeUserDir(deps), deps, "the VS Code user profile directory"));
+      break;
+    case "zed": {
+      add(detectByCli("zed", deps));
+      add(detectByPath(macAppBundlePath(deps, "Zed"), deps, "Zed.app"));
+      const settingsPath = zedSettingsPath(deps);
+      add(detectByPath(settingsPath ? dirname(settingsPath) : null, deps, "the Zed config directory"));
+      break;
+    }
+  }
+
+  return {
+    target,
+    label,
+    installed: signals.length > 0,
+    evidence: signals.map((signal) => signal.evidence),
+  };
+}
+
+/** Detect every supported client, independent of VX config state. */
+export function detectClients(deps: InstallerDeps = defaultDeps): ClientDetection[] {
+  return SUPPORTED_CLIENT_TARGETS.map((target) => detectClient(target, deps));
+}
+
+export function formatDetectReport(detections: ClientDetection[]): string[] {
+  const found = detections.filter((item) => item.installed);
+  const lines = [
+    `Detected ${found.length} of ${detections.length} supported AI tools on this machine:`,
+  ];
+  for (const item of detections) {
+    lines.push(`- ${item.label}: ${item.installed ? "found" : "not found"}`);
+    for (const evidence of item.evidence) {
+      lines.push(`  ${evidence}`);
+    }
+  }
+  if (found.length > 0) {
+    lines.push("");
+    lines.push(`Connect them: vx-mcp install ${found.map((item) => item.target).join(" && vx-mcp install ")}`);
+  }
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
 // Bulk installer
 // ---------------------------------------------------------------------------
 
-export function installAll(deps: InstallerDeps = defaultDeps): string[] {
+export function installAll(
+  deps: InstallerDeps = defaultDeps,
+  options: InstallOptions = {},
+): string[] {
   const notes: string[] = [];
   for (const target of SUPPORTED_CLIENT_TARGETS) {
     notes.push(`${CLIENT_LABELS[target]}:`);
-    for (const note of runInstall(target, deps)) {
+    for (const note of runInstall(target, deps, options)) {
       notes.push(`  ${note}`);
     }
   }
@@ -2057,16 +3055,23 @@ export function installAll(deps: InstallerDeps = defaultDeps): string[] {
 // CLI dispatch
 // ---------------------------------------------------------------------------
 
+const ALL_TARGETS_USAGE = SUPPORTED_CLIENT_TARGETS.join("|");
+
 const USAGE = [
-  `Usage: vx-mcp <command> [target]`,
+  `Usage: vx-mcp <command> [target] [--dry-run] [--json]`,
   ``,
   `Commands:`,
-  `  install <all|claude|cursor|codex|openclaw|hermes>  Wire up clients to ${VX_MCP_URL}`,
-  `  uninstall <claude|cursor|codex|openclaw|hermes>    Remove the VX MCP entry`,
+  `  install <all|${ALL_TARGETS_USAGE}>`,
+  `                                             Wire up clients to ${VX_MCP_URL}`,
+  `  uninstall <${ALL_TARGETS_USAGE}>`,
+  `                                             Remove the VX MCP entry`,
   `  login <openclaw|hermes|all>               Authorize OAuth MCP clients that support CLI login`,
   `  smoke <openclaw|hermes>                   Verify MCP OAuth/tools/model readiness before a live agent turn`,
   `  doctor                                    Report local VX MCP readiness`,
+  `  detect                                    Report which supported AI tools are installed on this machine`,
   `  clients                                   List supported clients`,
+  `  --dry-run                                 With install/uninstall: print exactly what would change, write nothing`,
+  `  --json                                    With detect: emit machine-readable JSON`,
   `  --version, -v                             Print package version`,
   `  --help, -h                                Show this message`,
   ``,
@@ -2096,7 +3101,10 @@ export async function handleCli(
   argv: string[],
   deps: InstallerDeps = defaultDeps,
 ): Promise<boolean> {
-  const [command, target] = argv;
+  const dryRun = argv.includes("--dry-run");
+  const json = argv.includes("--json");
+  const positional = argv.filter((arg) => arg !== "--dry-run" && arg !== "--json");
+  const [command, target] = positional;
 
   if (!command || command === "--help" || command === "-h" || command === "help") {
     printHelp();
@@ -2119,6 +3127,18 @@ export async function handleCli(
   if (command === "doctor" || command === "readiness") {
     for (const line of doctor(deps)) {
       console.log(line);
+    }
+    return true;
+  }
+
+  if (command === "detect") {
+    const detections = detectClients(deps);
+    if (json) {
+      console.log(JSON.stringify(detections, null, 2));
+    } else {
+      for (const line of formatDetectReport(detections)) {
+        console.log(line);
+      }
     }
     return true;
   }
@@ -2222,19 +3242,21 @@ export async function handleCli(
 
     let notes: string[];
     if (command === "install" && supportsAll) {
-      notes = installAll(deps);
+      notes = installAll(deps, { dryRun });
     } else if (isSupportedClient(target)) {
       notes =
         command === "install"
-          ? runInstall(target, deps)
-          : runUninstall(target, deps);
+          ? runInstall(target, deps, { dryRun })
+          : runUninstall(target, deps, { dryRun });
     } else {
       console.error(`Unknown target \`${target}\`.`);
       printHelp();
       return true;
     }
 
-    const verb = command === "install" ? "Installed" : "Removed";
+    const verb = command === "install"
+      ? (dryRun ? "Previewed install of" : "Installed")
+      : (dryRun ? "Previewed removal of" : "Removed");
     console.log(
       `${verb} VX MCP for ${supportsAll ? "all supported clients" : target}.`,
     );
@@ -2249,32 +3271,60 @@ export async function handleCli(
   return true;
 }
 
-function runInstall(target: SupportedClientTarget, deps: InstallerDeps): string[] {
+function runInstall(
+  target: SupportedClientTarget,
+  deps: InstallerDeps,
+  options: InstallOptions = {},
+): string[] {
   switch (target) {
     case "claude":
-      return installClaude(deps);
+      return installClaude(deps, options);
     case "cursor":
-      return installCursor(deps);
+      return installCursor(deps, options);
     case "codex":
-      return installCodex(deps);
+      return installCodex(deps, options);
     case "openclaw":
-      return installOpenClaw(deps);
+      return installOpenClaw(deps, options);
     case "hermes":
-      return installHermes(deps);
+      return installHermes(deps, options);
+    case "claude-desktop":
+      return installClaudeDesktop(deps, options);
+    case "windsurf":
+      return installWindsurf(deps, options);
+    case "cline":
+      return installCline(deps, options);
+    case "zed":
+      return installZed(deps, options);
+    case "vscode":
+      return installVsCode(deps, options);
   }
 }
 
-function runUninstall(target: SupportedClientTarget, deps: InstallerDeps): string[] {
+function runUninstall(
+  target: SupportedClientTarget,
+  deps: InstallerDeps,
+  options: InstallOptions = {},
+): string[] {
   switch (target) {
     case "claude":
-      return uninstallClaude(deps);
+      return uninstallClaude(deps, options);
     case "cursor":
-      return uninstallCursor(deps);
+      return uninstallCursor(deps, options);
     case "codex":
-      return uninstallCodex(deps);
+      return uninstallCodex(deps, options);
     case "openclaw":
-      return uninstallOpenClaw(deps);
+      return uninstallOpenClaw(deps, options);
+    case "claude-desktop":
+      return uninstallClaudeDesktop(deps, options);
+    case "windsurf":
+      return uninstallWindsurf(deps, options);
+    case "cline":
+      return uninstallCline(deps, options);
+    case "zed":
+      return uninstallZed(deps, options);
+    case "vscode":
+      return uninstallVsCode(deps, options);
     case "hermes":
-      return uninstallHermes(deps);
+      return uninstallHermes(deps, options);
   }
 }

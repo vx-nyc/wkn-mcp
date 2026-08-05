@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- Five new install targets: `claude-desktop`, `windsurf`, `cline`, `zed`, and
+  `vscode` (VS Code + GitHub Copilot Chat), each writing the correct
+  per-OS config path and format (Claude Desktop bridges through `mcp-remote`
+  since its config only supports local stdio servers).
+- `vx-mcp detect` (with `--json`) reports which supported AI tools are
+  actually installed on this machine, independent of whether VX is
+  configured for them yet.
+- `--dry-run` on every `install`/`uninstall` target prints a diff of exactly
+  what would change without writing anything.
+
 ### Fixed
 
 - OpenClaw installs now apply the `group:plugins` tool policy and compact

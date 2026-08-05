@@ -5,17 +5,29 @@ import {
   buildOpenClawPluginConfig,
   CODEX_BLOCK_START,
   CODEX_BLOCK_END,
+  detectClients,
   doctor,
+  formatDetectReport,
   getClientReadiness,
   HERMES_BLOCK_START,
   handleCli,
   installAll,
   installClaude,
+  installClaudeDesktop,
+  installCline,
   installCursor,
   installCodex,
   installHermes,
   installOpenClaw,
+  installVsCode,
+  installWindsurf,
+  installZed,
+  removeClaudeDesktopVxEntry,
+  removeClineVxEntry,
   removeCursorVxEntry,
+  removeVsCodeVxEntry,
+  removeWindsurfVxEntry,
+  removeZedVxEntry,
   stripHermesManagedBlock,
   stripHermesServerBlock,
   stripCodexManagedBlock,
@@ -23,11 +35,21 @@ import {
   smokeOpenClaw,
   uninstallHermes,
   uninstallClaude,
+  uninstallClaudeDesktop,
+  uninstallCline,
   uninstallCodex,
   uninstallCursor,
+  uninstallVsCode,
+  uninstallWindsurf,
+  uninstallZed,
   upsertCodexManagedBlock,
+  upsertClaudeDesktopVxEntry,
+  upsertClineVxEntry,
   upsertCursorVxEntry,
   upsertHermesManagedBlock,
+  upsertVsCodeVxEntry,
+  upsertWindsurfVxEntry,
+  upsertZedVxEntry,
   type InstallerDeps,
 } from "../src/installer.js";
 import {
@@ -60,6 +82,10 @@ function createDeps(overrides: Partial<InstallerDeps> = {}): InstallerDeps {
     spawnSync: spawn,
     homedir: () => home,
     env: {},
+    // Default to macOS so cross-platform config-path logic (Claude Desktop,
+    // VS Code, Cline, Zed) is deterministic regardless of the CI runner's
+    // actual OS. Tests exercising Windows/Linux paths override this.
+    platform: "darwin",
     ...overrides,
   };
 
@@ -1824,5 +1850,609 @@ describe("uninstallClaude", () => {
       "user",
       "vx",
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New clients: Claude Desktop, Windsurf, Cline, VS Code, Zed
+// ---------------------------------------------------------------------------
+
+describe("Claude Desktop mcpServers upsert", () => {
+  it("bridges through mcp-remote since Claude Desktop has no native HTTP transport", () => {
+    const next = upsertClaudeDesktopVxEntry(null);
+    expect(next.mcpServers?.vx).toEqual({
+      command: "npx",
+      args: ["-y", "mcp-remote", VX_URL],
+    });
+  });
+
+  it("preserves other stdio servers when upserting vx", () => {
+    const next = upsertClaudeDesktopVxEntry({
+      mcpServers: { other: { command: "node", args: ["server.js"] } },
+    });
+    expect(next.mcpServers?.other).toEqual({ command: "node", args: ["server.js"] });
+    expect(next.mcpServers?.vx).toBeDefined();
+  });
+
+  it("removeClaudeDesktopVxEntry deletes only the vx key", () => {
+    const next = removeClaudeDesktopVxEntry({
+      mcpServers: {
+        other: { command: "node", args: ["server.js"] },
+        vx: { command: "npx", args: ["-y", "mcp-remote", VX_URL] },
+      },
+    });
+    expect(next.mcpServers?.other).toBeDefined();
+    expect(next.mcpServers?.vx).toBeUndefined();
+  });
+});
+
+describe("Windsurf mcpServers upsert", () => {
+  it("uses serverUrl (Windsurf's field name for remote MCP)", () => {
+    const next = upsertWindsurfVxEntry(null);
+    expect(next.mcpServers?.vx).toEqual({ serverUrl: VX_URL });
+  });
+
+  it("removeWindsurfVxEntry deletes only the vx key", () => {
+    const next = removeWindsurfVxEntry({
+      mcpServers: { other: { serverUrl: "https://other.example/mcp" }, vx: { serverUrl: VX_URL } },
+    });
+    expect(next.mcpServers?.other).toBeDefined();
+    expect(next.mcpServers?.vx).toBeUndefined();
+  });
+});
+
+describe("Cline mcpServers upsert", () => {
+  it('uses "streamableHttp" (camelCase) — anything else silently falls back to SSE in Cline', () => {
+    const next = upsertClineVxEntry(null);
+    expect(next.mcpServers?.vx).toEqual({ type: "streamableHttp", url: VX_URL });
+  });
+
+  it("removeClineVxEntry deletes only the vx key", () => {
+    const next = removeClineVxEntry({
+      mcpServers: {
+        other: { type: "streamableHttp", url: "https://other.example/mcp" },
+        vx: { type: "streamableHttp", url: VX_URL },
+      },
+    });
+    expect(next.mcpServers?.other).toBeDefined();
+    expect(next.mcpServers?.vx).toBeUndefined();
+  });
+});
+
+describe("VS Code mcp.json upsert", () => {
+  it('uses the "servers" top-level key, not "mcpServers"', () => {
+    const next = upsertVsCodeVxEntry(null);
+    expect(next.servers?.vx).toEqual({ type: "http", url: VX_URL });
+    expect((next as Record<string, unknown>).mcpServers).toBeUndefined();
+  });
+
+  it("removeVsCodeVxEntry deletes only the vx key", () => {
+    const next = removeVsCodeVxEntry({
+      servers: { other: { type: "http", url: "https://other.example/mcp" }, vx: { type: "http", url: VX_URL } },
+    });
+    expect(next.servers?.other).toBeDefined();
+    expect(next.servers?.vx).toBeUndefined();
+  });
+});
+
+describe("Zed context_servers upsert", () => {
+  it("writes a bare url with no headers so Zed runs its own OAuth flow", () => {
+    const next = upsertZedVxEntry(null);
+    expect(next.context_servers?.vx).toEqual({ url: VX_URL });
+  });
+
+  it("preserves unrelated top-level Zed settings (theme, vim_mode, ...)", () => {
+    const next = upsertZedVxEntry({ theme: "One Dark", vim_mode: true });
+    expect(next.theme).toBe("One Dark");
+    expect(next.vim_mode).toBe(true);
+    expect(next.context_servers?.vx).toEqual({ url: VX_URL });
+  });
+
+  it("removeZedVxEntry deletes only the vx key and preserves other settings", () => {
+    const next = removeZedVxEntry({
+      theme: "One Dark",
+      context_servers: { other: { url: "https://other.example/mcp" }, vx: { url: VX_URL } },
+    });
+    expect(next.theme).toBe("One Dark");
+    expect(next.context_servers?.other).toBeDefined();
+    expect(next.context_servers?.vx).toBeUndefined();
+  });
+});
+
+describe("installClaudeDesktop", () => {
+  it("writes the mcp-remote bridge entry on macOS", () => {
+    const deps = createDeps({ platform: "darwin" });
+    const notes = installClaudeDesktop(deps);
+    const path = join(
+      deps.homedir(),
+      "Library",
+      "Application Support",
+      "Claude",
+      "claude_desktop_config.json",
+    );
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    expect(parsed.mcpServers.vx).toEqual({ command: "npx", args: ["-y", "mcp-remote", VX_URL] });
+    expect(notes.join("\n")).toContain("mcp-remote");
+  });
+
+  it("writes to %APPDATA%\\Claude on Windows", () => {
+    const appData = mkdtempSync(join(tmpdir(), "vx-mcp-appdata-"));
+    const deps = createDeps({ platform: "win32", env: { APPDATA: appData } });
+    installClaudeDesktop(deps);
+    const path = join(appData, "Claude", "claude_desktop_config.json");
+    expect(existsSync(path)).toBe(true);
+  });
+
+  it("skips cleanly on Linux instead of guessing a path", () => {
+    const deps = createDeps({ platform: "linux" });
+    const notes = installClaudeDesktop(deps);
+    expect(notes.join("\n")).toContain("skipping");
+    expect(
+      existsSync(join(deps.homedir(), "Library", "Application Support", "Claude", "claude_desktop_config.json")),
+    ).toBe(false);
+  });
+
+  it("merges with an existing config instead of overwriting other servers", () => {
+    const deps = createDeps();
+    const path = join(
+      deps.homedir(),
+      "Library",
+      "Application Support",
+      "Claude",
+      "claude_desktop_config.json",
+    );
+    mkdirSync(join(deps.homedir(), "Library", "Application Support", "Claude"), { recursive: true });
+    writeFileSync(
+      path,
+      JSON.stringify({ mcpServers: { other: { command: "node", args: ["s.js"] } } }),
+      "utf8",
+    );
+    installClaudeDesktop(deps);
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    expect(parsed.mcpServers.other).toBeDefined();
+    expect(parsed.mcpServers.vx).toBeDefined();
+  });
+
+  it("is idempotent across repeat installs", () => {
+    const deps = createDeps();
+    installClaudeDesktop(deps);
+    installClaudeDesktop(deps);
+    const path = join(
+      deps.homedir(),
+      "Library",
+      "Application Support",
+      "Claude",
+      "claude_desktop_config.json",
+    );
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    expect(Object.keys(parsed.mcpServers)).toEqual(["vx"]);
+  });
+
+  it("does not touch a config file it cannot parse as JSON", () => {
+    const deps = createDeps();
+    const path = join(
+      deps.homedir(),
+      "Library",
+      "Application Support",
+      "Claude",
+      "claude_desktop_config.json",
+    );
+    mkdirSync(join(deps.homedir(), "Library", "Application Support", "Claude"), { recursive: true });
+    writeFileSync(path, "{ not valid json", "utf8");
+    const notes = installClaudeDesktop(deps);
+    expect(readFileSync(path, "utf8")).toBe("{ not valid json");
+    expect(notes.join("\n")).toContain("could not be parsed as JSON");
+  });
+
+  it("uninstall removes only the vx entry", () => {
+    const deps = createDeps();
+    installClaudeDesktop(deps);
+    const path = join(
+      deps.homedir(),
+      "Library",
+      "Application Support",
+      "Claude",
+      "claude_desktop_config.json",
+    );
+    const before = JSON.parse(readFileSync(path, "utf8"));
+    before.mcpServers.other = { command: "node", args: ["s.js"] };
+    writeFileSync(path, JSON.stringify(before), "utf8");
+
+    uninstallClaudeDesktop(deps);
+    const after = JSON.parse(readFileSync(path, "utf8"));
+    expect(after.mcpServers.other).toBeDefined();
+    expect(after.mcpServers.vx).toBeUndefined();
+  });
+});
+
+describe("installWindsurf / installCline / installVsCode / installZed", () => {
+  it("installWindsurf writes ~/.codeium/windsurf/mcp_config.json with serverUrl", () => {
+    const deps = createDeps();
+    installWindsurf(deps);
+    const path = join(deps.homedir(), ".codeium", "windsurf", "mcp_config.json");
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    expect(parsed.mcpServers.vx).toEqual({ serverUrl: VX_URL });
+  });
+
+  it("installCline writes into the VS Code globalStorage path for saoudrizwan.claude-dev", () => {
+    const deps = createDeps();
+    installCline(deps);
+    const path = join(
+      deps.homedir(),
+      "Library",
+      "Application Support",
+      "Code",
+      "User",
+      "globalStorage",
+      "saoudrizwan.claude-dev",
+      "settings",
+      "cline_mcp_settings.json",
+    );
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    expect(parsed.mcpServers.vx).toEqual({ type: "streamableHttp", url: VX_URL });
+  });
+
+  it("installVsCode writes ~/.../Code/User/mcp.json under the servers key", () => {
+    const deps = createDeps();
+    installVsCode(deps);
+    const path = join(deps.homedir(), "Library", "Application Support", "Code", "User", "mcp.json");
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    expect(parsed.servers.vx).toEqual({ type: "http", url: VX_URL });
+  });
+
+  it("installZed writes ~/.config/zed/settings.json under context_servers", () => {
+    const deps = createDeps();
+    installZed(deps);
+    const path = join(deps.homedir(), ".config", "zed", "settings.json");
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    expect(parsed.context_servers.vx).toEqual({ url: VX_URL });
+  });
+
+  it("installZed preserves unrelated settings and never corrupts a JSONC file with comments", () => {
+    const deps = createDeps();
+    const path = join(deps.homedir(), ".config", "zed", "settings.json");
+    mkdirSync(join(deps.homedir(), ".config", "zed"), { recursive: true });
+    const originalWithComments = '{\n  // a comment\n  "vim_mode": true\n}\n';
+    writeFileSync(path, originalWithComments, "utf8");
+
+    const notes = installZed(deps);
+
+    expect(readFileSync(path, "utf8")).toBe(originalWithComments);
+    expect(notes.join("\n")).toContain("could not be parsed as JSON");
+    expect(notes.join("\n")).toContain(VX_URL);
+  });
+
+  it("uninstallWindsurf/Cline/VsCode/Zed each remove only the vx entry", () => {
+    const deps = createDeps();
+    installWindsurf(deps);
+    installCline(deps);
+    installVsCode(deps);
+    installZed(deps);
+
+    uninstallWindsurf(deps);
+    uninstallCline(deps);
+    uninstallVsCode(deps);
+    uninstallZed(deps);
+
+    const windsurfPath = join(deps.homedir(), ".codeium", "windsurf", "mcp_config.json");
+    const clinePath = join(
+      deps.homedir(),
+      "Library",
+      "Application Support",
+      "Code",
+      "User",
+      "globalStorage",
+      "saoudrizwan.claude-dev",
+      "settings",
+      "cline_mcp_settings.json",
+    );
+    const vsCodePath = join(deps.homedir(), "Library", "Application Support", "Code", "User", "mcp.json");
+    const zedPath = join(deps.homedir(), ".config", "zed", "settings.json");
+
+    expect(JSON.parse(readFileSync(windsurfPath, "utf8")).mcpServers.vx).toBeUndefined();
+    expect(JSON.parse(readFileSync(clinePath, "utf8")).mcpServers.vx).toBeUndefined();
+    expect(JSON.parse(readFileSync(vsCodePath, "utf8")).servers.vx).toBeUndefined();
+    expect(JSON.parse(readFileSync(zedPath, "utf8")).context_servers.vx).toBeUndefined();
+  });
+
+  it("uninstall is a no-op that reports nothing-to-remove when never installed", () => {
+    const deps = createDeps();
+    const notes = uninstallWindsurf(deps);
+    expect(notes.join("\n")).toContain("nothing to remove");
+  });
+});
+
+describe("cross-platform config path resolution", () => {
+  it("VS Code / Cline resolve under %APPDATA%\\Code\\User on Windows", () => {
+    const appData = mkdtempSync(join(tmpdir(), "vx-mcp-appdata-"));
+    const deps = createDeps({ platform: "win32", env: { APPDATA: appData } });
+    installVsCode(deps);
+    installCline(deps);
+    expect(existsSync(join(appData, "Code", "User", "mcp.json"))).toBe(true);
+    expect(
+      existsSync(
+        join(appData, "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
+      ),
+    ).toBe(true);
+  });
+
+  it("VS Code / Cline resolve under ~/.config/Code/User on Linux", () => {
+    const deps = createDeps({ platform: "linux" });
+    installVsCode(deps);
+    expect(existsSync(join(deps.homedir(), ".config", "Code", "User", "mcp.json"))).toBe(true);
+  });
+
+  it("Zed resolves under %APPDATA%\\Zed on Windows", () => {
+    const appData = mkdtempSync(join(tmpdir(), "vx-mcp-appdata-"));
+    const deps = createDeps({ platform: "win32", env: { APPDATA: appData } });
+    installZed(deps);
+    expect(existsSync(join(appData, "Zed", "settings.json"))).toBe(true);
+  });
+
+  it("Zed respects XDG_CONFIG_HOME on Linux", () => {
+    const xdg = mkdtempSync(join(tmpdir(), "vx-mcp-xdg-"));
+    const deps = createDeps({ platform: "linux", env: { XDG_CONFIG_HOME: xdg } });
+    installZed(deps);
+    expect(existsSync(join(xdg, "zed", "settings.json"))).toBe(true);
+  });
+
+  it("Windsurf resolves the same ~/.codeium/windsurf path on every platform", () => {
+    for (const platform of ["darwin", "win32", "linux"] as const) {
+      const deps = createDeps({ platform });
+      installWindsurf(deps);
+      expect(existsSync(join(deps.homedir(), ".codeium", "windsurf", "mcp_config.json"))).toBe(true);
+    }
+  });
+});
+
+describe("--dry-run", () => {
+  it("installCursor --dry-run writes nothing and shows a diff preview", () => {
+    const deps = createDeps();
+    const path = join(deps.homedir(), ".cursor", "mcp.json");
+    const notes = installCursor(deps, { dryRun: true });
+    expect(existsSync(path)).toBe(false);
+    expect(notes.join("\n")).toContain("[dry-run]");
+    expect(notes.join("\n")).toContain(VX_URL);
+  });
+
+  it("installClaudeDesktop --dry-run writes nothing but previews the exact diff against an existing file", () => {
+    const deps = createDeps();
+    const path = join(
+      deps.homedir(),
+      "Library",
+      "Application Support",
+      "Claude",
+      "claude_desktop_config.json",
+    );
+    mkdirSync(join(deps.homedir(), "Library", "Application Support", "Claude"), { recursive: true });
+    writeFileSync(path, JSON.stringify({ mcpServers: { other: { command: "node", args: [] } } }), "utf8");
+    const before = readFileSync(path, "utf8");
+
+    const notes = installClaudeDesktop(deps, { dryRun: true });
+
+    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(notes.join("\n")).toContain("[dry-run] Would update");
+    expect(notes.join("\n")).toContain("+");
+  });
+
+  it("a second dry-run after a real install reports no changes needed", () => {
+    const deps = createDeps();
+    installWindsurf(deps);
+    const notes = installWindsurf(deps, { dryRun: true });
+    expect(notes.join("\n")).toContain("already reflects the selected VX MCP endpoint");
+  });
+
+  it("uninstallCodex --dry-run leaves the managed block in place", () => {
+    const deps = createDeps();
+    installCodex(deps);
+    const configPath = join(deps.homedir(), ".codex", "config.toml");
+    const before = readFileSync(configPath, "utf8");
+
+    const notes = uninstallCodex(deps, { dryRun: true });
+
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(notes.join("\n")).toContain("[dry-run]");
+  });
+
+  it("installClaude --dry-run does not call the Claude CLI and does not copy the slash command", () => {
+    const deps = createDeps();
+    mockSpawn(deps, { status: 0, stdout: "/usr/local/bin/claude\n" });
+    const notes = installClaude(deps, { dryRun: true });
+    const commandPath = join(deps.homedir(), ".claude", "commands", "vx-memory.md");
+
+    expect(existsSync(commandPath)).toBe(false);
+    expect(vi.mocked(deps.spawnSync)).toHaveBeenCalledTimes(1); // only the findCli lookup
+    expect(notes.join("\n")).toContain("[dry-run] Would run: claude mcp add");
+  });
+
+  it("does not show an entire file as changed just because it uses different JSON formatting than our canonical output", () => {
+    // Regression test: a real-world config file (different indentation, key
+    // order, no vx key yet) must produce a diff that isolates the actual
+    // change, not a full-file rewrite, even though we always *write*
+    // canonically re-serialized JSON.
+    const deps = createDeps();
+    const path = join(
+      deps.homedir(),
+      "Library",
+      "Application Support",
+      "Claude",
+      "claude_desktop_config.json",
+    );
+    mkdirSync(join(deps.homedir(), "Library", "Application Support", "Claude"), { recursive: true });
+    const differentlyFormatted =
+      '{\n    "mcpServers": {\n        "other": {"command": "node", "args": ["s.js"]}\n    },\n    "somePreference": true\n}\n';
+    writeFileSync(path, differentlyFormatted, "utf8");
+
+    const notes = installClaudeDesktop(deps, { dryRun: true }).join("\n");
+
+    // The unrelated preference line must NOT appear as a removed/re-added line.
+    expect(notes).not.toContain('- "somePreference": true');
+    expect(notes).not.toContain('+ "somePreference": true');
+    // But the new vx entry must show up as an addition.
+    expect(notes).toContain("+     \"vx\": {");
+  });
+
+  it("a real (non-dry-run) install that changes nothing semantically does not rewrite/reformat the file", () => {
+    const deps = createDeps();
+    const path = join(deps.homedir(), ".codeium", "windsurf", "mcp_config.json");
+    mkdirSync(join(deps.homedir(), ".codeium", "windsurf"), { recursive: true });
+    // Already has the correct vx entry, but hand-formatted differently than
+    // our canonical 2-space output (single line, no trailing newline).
+    const handFormatted = `{"mcpServers":{"vx":{"serverUrl":"${VX_URL}"}}}`;
+    writeFileSync(path, handFormatted, "utf8");
+
+    installWindsurf(deps, { dryRun: false });
+
+    expect(readFileSync(path, "utf8")).toBe(handFormatted);
+  });
+
+  it("handleCli forwards --dry-run through install/uninstall regardless of flag position", async () => {
+    const deps = createDeps();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await handleCli(["install", "cursor", "--dry-run"], deps);
+    expect(existsSync(join(deps.homedir(), ".cursor", "mcp.json"))).toBe(false);
+
+    await handleCli(["--dry-run", "install", "cursor"], deps);
+    expect(existsSync(join(deps.homedir(), ".cursor", "mcp.json"))).toBe(false);
+  });
+});
+
+describe("detectClients", () => {
+  it("reports installed: false with no evidence when nothing is found", () => {
+    const deps = createDeps();
+    mockSpawn(deps, ...Array(20).fill({ status: 1 }));
+    const detections = detectClients(deps);
+    const windsurf = detections.find((d) => d.target === "windsurf");
+    expect(windsurf).toMatchObject({ installed: false, evidence: [] });
+  });
+
+  it("detects a client from a CLI on PATH", () => {
+    const deps = createDeps();
+    // Detection issues several `command -v <binary>` probes across targets;
+    // respond based on which binary is being checked rather than call order.
+    vi.mocked(deps.spawnSync).mockImplementation((_cmd, args) => {
+      const script = String((args as string[] | undefined)?.at(-1) ?? "");
+      const found = script.includes("command -v codex");
+      return {
+        status: found ? 0 : 1,
+        stdout: found ? "/usr/local/bin/codex\n" : "",
+        stderr: "",
+        pid: 1,
+        output: [],
+        signal: null,
+      };
+    });
+    const detections = detectClients(deps);
+    const codex = detections.find((d) => d.target === "codex");
+    expect(codex?.installed).toBe(true);
+    expect(codex?.evidence.join("\n")).toContain("codex");
+    expect(detections.find((d) => d.target === "claude")?.installed).toBe(false);
+  });
+
+  it("detects a client from an existing config directory even without a CLI", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".cursor"), { recursive: true });
+    mockSpawn(deps, ...Array(20).fill({ status: 1 }));
+    const detections = detectClients(deps);
+    const cursor = detections.find((d) => d.target === "cursor");
+    expect(cursor?.installed).toBe(true);
+  });
+
+  it("returns one detection per supported client target", () => {
+    const deps = createDeps();
+    mockSpawn(deps, ...Array(20).fill({ status: 1 }));
+    const detections = detectClients(deps);
+    expect(detections.map((d) => d.target).sort()).toEqual(
+      [
+        "claude",
+        "claude-desktop",
+        "cline",
+        "codex",
+        "cursor",
+        "hermes",
+        "openclaw",
+        "vscode",
+        "windsurf",
+        "zed",
+      ].sort(),
+    );
+  });
+
+  it("formatDetectReport counts found tools and suggests connecting them", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".cursor"), { recursive: true });
+    mockSpawn(deps, ...Array(20).fill({ status: 1 }));
+    const report = formatDetectReport(detectClients(deps)).join("\n");
+    expect(report).toMatch(/Detected \d+ of \d+ supported AI tools/);
+    expect(report).toContain("Cursor: found");
+    expect(report).toContain("vx-mcp install cursor");
+  });
+});
+
+describe("getClientReadiness for new clients", () => {
+  it("reports needs-install before installing", () => {
+    const deps = createDeps();
+    expect(getClientReadiness("windsurf", deps)).toMatchObject({ status: "needs-install" });
+    expect(getClientReadiness("vscode", deps)).toMatchObject({ status: "needs-install" });
+  });
+
+  it("reports ready once installed, and re-reads live state (no caching)", () => {
+    const deps = createDeps();
+    installVsCode(deps);
+    expect(getClientReadiness("vscode", deps)).toMatchObject({ status: "ready" });
+
+    // Simulate the client rewriting its own config on an update and losing
+    // the vx entry — doctor must notice on the very next call.
+    const path = join(deps.homedir(), "Library", "Application Support", "Code", "User", "mcp.json");
+    writeFileSync(path, JSON.stringify({ servers: {} }), "utf8");
+    expect(getClientReadiness("vscode", deps)).toMatchObject({ status: "needs-install" });
+  });
+
+  it("reports unsupported for Claude Desktop on Linux instead of a wrong path", () => {
+    const deps = createDeps({ platform: "linux" });
+    expect(getClientReadiness("claude-desktop", deps)).toMatchObject({ status: "unsupported" });
+  });
+});
+
+describe("handleCli detect", () => {
+  it("prints a human-readable report by default", async () => {
+    const deps = createDeps();
+    mockSpawn(deps, ...Array(20).fill({ status: 1 }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await handleCli(["detect"], deps);
+    const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(output).toMatch(/Detected \d+ of \d+ supported AI tools/);
+  });
+
+  it("prints machine-readable JSON with --json", async () => {
+    const deps = createDeps();
+    mockSpawn(deps, ...Array(20).fill({ status: 1 }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await handleCli(["detect", "--json"], deps);
+    const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
+    const parsed = JSON.parse(output);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed[0]).toHaveProperty("target");
+    expect(parsed[0]).toHaveProperty("installed");
+  });
+});
+
+describe("install all includes every new client", () => {
+  it("wires Claude Desktop, Windsurf, Cline, Zed, and VS Code alongside the existing clients", () => {
+    const deps = createDeps();
+    mockSpawn(deps, { status: 1 }, { status: 1 });
+
+    const notes = installAll(deps).join("\n");
+
+    expect(existsSync(join(deps.homedir(), ".codeium", "windsurf", "mcp_config.json"))).toBe(true);
+    expect(existsSync(join(deps.homedir(), ".config", "zed", "settings.json"))).toBe(true);
+    expect(
+      existsSync(join(deps.homedir(), "Library", "Application Support", "Code", "User", "mcp.json")),
+    ).toBe(true);
+    expect(notes).toContain("Claude Desktop");
+    expect(notes).toContain("Windsurf");
+    expect(notes).toContain("Cline");
+    expect(notes).toContain("Zed");
+    expect(notes).toContain("VS Code + Copilot");
   });
 });
