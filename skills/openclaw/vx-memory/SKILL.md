@@ -27,6 +27,16 @@ Use VX as OpenClaw's durable memory layer.
 - Ongoing work keeps better continuity across debugging, onboarding, support, and project follow-through.
 - Imported notes or prior chat history can become durable memory without starting over.
 
+## Hand off to another tool
+
+Use this when asked to hand work off, continue elsewhere, or pick up a thread started in another VX-connected tool.
+
+- **Handing off**: create or reuse a `handoff/<short-slug>` context, then `vx_store` one atomic memory in it: the decision or state, the reason, and what the next tool should do. Report back exactly what was stored — never a silent hand-off.
+- **Picking up**: when continuing a hand-off, `vx_recall` or `vx_context` the named `handoff/<slug>` context, then state plainly what was retrieved before acting on it.
+- **"Don't carry this"**: if told not to carry a conversation forward, `vx_delete` the memory just stored (or the `handoff/<slug>` context) immediately.
+- Compartments still apply: recall and store go through OpenClaw's own connected scope. A hand-off missing from another tool is the access boundary working as intended, not a defect.
+- This is explicit only — OpenClaw does not passively capture what happens in other tools; nothing carries over unless VX is asked to store or recall it.
+
 ## Avoid
 
 - Secrets, tokens, private keys, or credentials.

@@ -3185,6 +3185,13 @@ export function doctor(deps: InstallerDeps = defaultDeps): string[] {
   lines.push("  4. Call vx_librarian_context to load VX purpose and memory policy from VX memory.");
   lines.push("  5. Call vx_reality with the context the agent should use.");
   lines.push("  Do not copy VX policy into local prompts; keep agent reality in VX contexts.");
+  lines.push("");
+  lines.push("Continuity between tools:");
+  lines.push("  Recent VX memory is already available to any connected client via vx_recall/vx_context,");
+  lines.push("  scoped by that client's compartment — see `vx-mcp status`.");
+  lines.push("  For an explicit hand-off, ask an agent to store a `handoff/<slug>` memory in one tool");
+  lines.push("  and recall it in another; ask it to say what it stored, and to delete it if you don't");
+  lines.push("  want that hand-off to carry forward.");
   return lines;
 }
 

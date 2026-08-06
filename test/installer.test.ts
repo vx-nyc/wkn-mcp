@@ -1254,6 +1254,15 @@ describe("doctor/readiness", () => {
     expect(lines).toContain("vx_reality");
     expect(lines).toContain("Do not copy VX policy into local prompts");
   });
+
+  it("doctor documents the explicit hand-off convention for continuity between tools (ONE-117)", () => {
+    const deps = createDeps();
+    mockSpawn(deps, { status: 1 }, { status: 1 });
+    const lines = doctor(deps).join("\n");
+    expect(lines).toContain("Continuity between tools:");
+    expect(lines).toContain("handoff/<slug>");
+    expect(lines).toContain("vx-mcp status");
+  });
 });
 
 describe("handleCli", () => {

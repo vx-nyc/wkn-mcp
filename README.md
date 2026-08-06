@@ -533,6 +533,28 @@ Recommended workflow:
 8. Use `vx_import_text` or `vx_import_batch` to migrate prior notes or exports.
 9. Never store secrets, tokens, private keys, or credentials.
 
+### Continuity: starting in one tool, finishing in another
+
+Anything already stored in VX is available to any connected client through
+`vx_recall`/`vx_context`, subject to that client's compartment — that is
+ambient continuity for existing knowledge, and it needs no extra setup beyond
+`connect`.
+
+For handing off a specific, current piece of work between tools, the bundled
+guidance above teaches each agent an explicit convention:
+
+1. **Hand off**: store one atomic memory in a `handoff/<slug>` context, and
+   have the agent tell you exactly what it stored.
+2. **Pick up**: in the other tool, recall that `handoff/<slug>` context, and
+   have the agent state plainly what it retrieved before acting on it.
+3. **Don't carry this**: ask the agent to delete the hand-off memory (or the
+   whole `handoff/<slug>` context) — one action, and it's gone.
+
+This is deliberately explicit rather than automatic: vx-mcp does not watch or
+capture what happens inside any connected tool, so nothing crosses over
+unless an agent is asked to store or recall it. Passive, ambient capture of
+an entire conversation as it happens is a separate, not-yet-shipped client.
+
 ## Tools
 
 The hosted MCP server exposes the same VX tool catalog you had in v0.x:
