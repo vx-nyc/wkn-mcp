@@ -25,6 +25,16 @@ Use VX as Hermes Agent's durable memory layer.
 - Imported notes or prior chat history can become shared, governed memory without rewriting prompts.
 - Hermes can continue a workstream from the same VX context another agent used.
 
+## Hand off to another tool
+
+Use this when asked to hand work off, continue elsewhere, or pick up a thread started in another VX-connected tool.
+
+- **Handing off**: create or reuse a `handoff/<short-slug>` context, then `mcp_vx_vx_store` one atomic memory in it: the decision or state, the reason, and what the next tool should do. Report back exactly what was stored — never a silent hand-off.
+- **Picking up**: when continuing a hand-off, `mcp_vx_vx_recall` or `mcp_vx_vx_context` the named `handoff/<slug>` context, then state plainly what was retrieved before acting on it.
+- **"Don't carry this"**: if told not to carry a conversation forward, `mcp_vx_vx_delete` the memory just stored (or the `handoff/<slug>` context) immediately.
+- Compartments still apply: recall and store go through Hermes's own connected scope. A hand-off missing from another tool is the access boundary working as intended, not a defect.
+- This is explicit only — Hermes does not passively capture what happens in other tools; nothing carries over unless VX is asked to store or recall it.
+
 ## Avoid
 
 - Secrets, tokens, private keys, or credentials.

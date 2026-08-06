@@ -5,7 +5,8 @@ Instructions for AI agents working on `@vx-nyc/vx-mcp`, the v1 installer.
 ## What this package is (and isn't)
 
 As of v1.0.0, this package is **only an installer**. It writes config so
-Claude Code, Cursor, Codex, OpenClaw, and Hermes connect to the hosted VX MCP server
+Claude Code, Cursor, Codex, OpenClaw, Hermes, Claude Desktop, Windsurf, Cline,
+Zed, and VS Code (+ GitHub Copilot Chat) connect to the hosted VX MCP server
 at `https://api.onememory.co/mcp` over HTTP, with OAuth handled by the
 client. It does not:
 
@@ -18,6 +19,15 @@ client. It does not:
 If a change introduces any of the above, it does not belong in v1. Adding
 stdio fallback, env-var auth, or a local server would re-introduce the
 maintenance and security problems v1 was created to remove.
+
+**Exception, not a loophole:** Claude Desktop's config format only
+understands local stdio servers — it has no config-file-based remote
+HTTP/OAuth transport. The Claude Desktop installer therefore writes an entry
+that runs the third-party `mcp-remote` bridge via `npx`, which itself speaks
+Streamable HTTP + OAuth to the hosted VX endpoint. This is *configuring
+Claude Desktop*, not this package shipping a runtime — vx-mcp still never
+runs a server process, stores a credential, or reads a `VX_*` env var. Do not
+"fix" this by inventing a static-token/stdio path for vx-mcp itself.
 
 ## Public repo guardrails
 
@@ -57,7 +67,7 @@ This repository is public. Treat it as public at all times.
 ```
 src/
   index.ts         # CLI entry, dispatches to handleCli()
-  installer.ts     # install/uninstall for claude, cursor, codex, openclaw, hermes
+  installer.ts     # install/uninstall/detect for every supported client
   constants.ts     # canonical URL + package name + server name
 test/
   installer.test.ts
@@ -74,12 +84,36 @@ openclaw.plugin.json
 
 ## Adding a new client
 
-1. Add the client tag to `SUPPORTED_CLIENT_TARGETS` in `src/installer.ts`.
-2. Implement `installX(deps)` and `uninstallX(deps)`. Both must be
-   idempotent. Both must point at `VX_MCP_URL` from `constants.ts`.
-3. Wire it into `runInstall()` / `runUninstall()`.
-4. Add tests in `test/installer.test.ts`.
-5. Update README with a section in the Quick Start.
+1. Research the client's actual config file path per OS from its own docs —
+   never guess. If you can't confirm a path, leave that platform out rather
+   than shipping a wrong one (see `claudeDesktopConfigPath` returning `null`
+   on Linux for the pattern).
+2. Add the client tag to `SupportedClientTarget` / `SUPPORTED_CLIENT_TARGETS`
+   / `CLIENT_LABELS` in `src/installer.ts`.
+3. If the client stores MCP servers as a named map under one JSON key
+   (most do), add a spec to the `JsonMcpClientSpec` table and thin
+   `installX`/`uninstallX` wrappers around `installJsonMcpClient` /
+   `uninstallJsonMcpClient` — don't hand-roll the merge/remove logic per
+   client. Otherwise (TOML, YAML, a CLI-driven client) follow the
+   Codex/Hermes/OpenClaw pattern instead.
+4. Every installX/uninstallX must accept `(deps, options: InstallOptions)`,
+   be idempotent, merge rather than overwrite existing file content, support
+   `options.dryRun` (route file writes through `writeOrPreview`), and point
+   at the URL from `installUrl(options)` — not `VX_MCP_URL` directly — so
+   `connect --compartment <name>` scopes this client the same as every other
+   one. If any code path compares a stored URL back to `VX_MCP_URL` (for
+   readiness or status), use `isVxMcpUrl()`/prefix-tolerant matching instead
+   of strict equality, since a compartment-scoped URL has a `?compartment=`
+   suffix.
+5. Add a case to `getClientReadiness()` (reuse `jsonMcpClientReadiness` for
+   JSON-map clients) and to `detectClient()` so `doctor`/`detect` both cover
+   it.
+6. Wire it into `runInstall()` / `runUninstall()`.
+7. Add tests in `test/installer.test.ts`: upsert/remove merge safety,
+   install/uninstall round-trip, dry-run no-op, and any unusual failure mode
+   (e.g. Zed's JSONC comments must not be corrupted).
+8. Update README with a section in the Quick Start and in the CLI/uninstall
+   command lists.
 
 ## Publishing
 

@@ -39,3 +39,13 @@ Use VX as the durable memory layer for coding and workflow continuity.
 - Ask focused questions such as `release workflow`, `test runner`, `billing retry policy`, or `repo conventions`.
 - Retry with a specific knowledge context when recall is too broad.
 - Gather the needed facts first, then continue with the implementation.
+
+## Hand off to another tool
+
+Use this when the user asks to hand work off, continue elsewhere, or pick up a thread started in another VX-connected tool (Claude Code, Cursor, Hermes, OpenClaw, etc.).
+
+- **Handing off**: create or reuse a `handoff/<short-slug>` knowledge context, then `vx_store` one atomic memory in it: the decision or state, the reason, and what the next tool should do. Report back exactly what was stored before ending the session — never a silent hand-off.
+- **Picking up**: when continuing a hand-off, `vx_recall` or `vx_context` the named `handoff/<slug>` context, then state plainly what was retrieved before acting on it.
+- **"Don't carry this"**: if the user says not to carry a conversation forward, `vx_delete` the memory just stored (or the `handoff/<slug>` context) immediately, before the session ends.
+- Compartments still apply: recall and store go through this tool's own connected scope. A hand-off missing from another tool is the access boundary working as intended, not a defect.
+- This is explicit only — Codex does not passively capture what happens in other tools; nothing carries over unless VX is asked to store or recall it.

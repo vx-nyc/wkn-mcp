@@ -29,18 +29,55 @@ users should leave this unset.
 `@vx-nyc/vx-mcp` is published on **GitHub Packages** (`npm.pkg.github.com`), not
 the public npm registry.
 
-One-time registry setup:
+One-time registry and auth setup (GitHub Packages requires a token even for public packages):
 
 ```bash
 npm config set @vx-nyc:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken "$(gh auth token)"
 ```
 
-Authenticate with a GitHub token that has `read:packages`. If you use GitHub
-CLI, this is usually enough:
+If you use GitHub CLI, `gh auth login` must be done first. Without GitHub CLI,
+create a personal access token with `read:packages` and substitute it for
+`$(gh auth token)`.
+
+### Connect one client to a named compartment
 
 ```bash
-export NODE_AUTH_TOKEN=$(gh auth token)
+npx @vx-nyc/vx-mcp connect cursor --compartment personal
+npx @vx-nyc/vx-mcp connect claude-desktop --compartment work-laptop
 ```
+
+`connect` is the compartment-aware way to wire up a single client. Every
+`connect` requires `--compartment <name>` — there is no unscoped default, and
+vx-mcp refuses to write a config without one. The compartment name is written
+into that client's own connection URL, so a work laptop's Cursor and a
+personal machine's Claude Desktop can be bound to different compartments and
+never end up sharing knowledge that shouldn't cross.
+
+To change a client's compartment later, just run `connect` again with a new
+name — it's idempotent, the same as `install`.
+
+Check what every connected client can see in one command:
+
+```bash
+npx @vx-nyc/vx-mcp status
+```
+
+This reports, per client: not connected, connected with a named compartment,
+or connected but **unscoped** (a plain `install`, with no compartment — flagged
+because an unscoped connection can read everything the account grants).
+
+### Which tools do you already have installed?
+
+```bash
+npx @vx-nyc/vx-mcp detect
+```
+
+Scans this machine for every supported client (Claude Code, Cursor, Codex,
+OpenClaw, Hermes Agent, Claude Desktop, Windsurf, Cline, Zed, and VS Code) and
+reports which ones it found — from a CLI on PATH, an installed app, or an
+existing config directory — without changing anything. Add `--json` for
+machine-readable output.
 
 ### All supported local clients
 
@@ -48,11 +85,20 @@ export NODE_AUTH_TOKEN=$(gh auth token)
 npx @vx-nyc/vx-mcp install all
 ```
 
-This runs the installer for Claude Code, Cursor, Codex, OpenClaw, and Hermes
-Agent in one pass. Clients that support local config files are updated directly. Clients
-that require their own CLI are configured when the CLI is on your PATH; if a
-CLI is missing, the installer prints the exact manual command or config
-snippet to apply.
+This runs the installer for every supported client in one pass. Clients that
+support local config files are updated directly. Clients that require their
+own CLI are configured when the CLI is on your PATH; if a CLI is missing, the
+installer prints the exact manual command or config snippet to apply.
+
+Preview exactly what would change first, without writing anything:
+
+```bash
+npx @vx-nyc/vx-mcp install all --dry-run
+```
+
+`--dry-run` works with every `install`/`uninstall` target and prints a diff of
+the config file it would write (or "already reflects the selected VX MCP
+endpoint" if there's nothing to do).
 
 ### Install without GitHub Packages auth
 
@@ -69,10 +115,12 @@ Check readiness without changing any local config:
 npx @vx-nyc/vx-mcp doctor
 ```
 
-The doctor reports local config status for Claude Code, Cursor, Codex,
-OpenClaw, Hermes Agent, and the manual ChatGPT remote-MCP setup path. When a
-local runtime is discoverable, it also verifies that the runtime can start so a
-config-only install is not mistaken for a working agent instance.
+The doctor reports local config status for every supported client and the
+manual ChatGPT remote-MCP setup path. When a local runtime is discoverable, it
+also verifies that the runtime can start so a config-only install is not
+mistaken for a working agent instance. Because it re-reads each client's live
+config on every run, it also notices when a client update wiped out the VX
+entry — rerunning `install` fixes that the same way it did the first time.
 
 ### Claude Code
 
@@ -125,6 +173,139 @@ Manual equivalent — add this to `~/.codex/config.toml`:
 [mcp_servers.vx]
 url = "https://api.onememory.co/mcp"
 transport = "streamable_http"
+```
+
+### Claude Desktop
+
+```bash
+npx @vx-nyc/vx-mcp install claude-desktop
+```
+
+Config path: macOS `~/Library/Application Support/Claude/claude_desktop_config.json`,
+Windows `%APPDATA%\Claude\claude_desktop_config.json`. (Claude Desktop has no
+Linux build.)
+
+Claude Desktop's config only understands local (stdio) MCP servers — it has no
+built-in remote-HTTP/OAuth transport. This installer writes an entry that runs
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote) via `npx`, the
+community-standard bridge that speaks stdio to Claude Desktop and Streamable
+HTTP to the hosted VX endpoint, opening your browser for OAuth on first use.
+vx-mcp itself never sees or stores a credential.
+
+Manual equivalent — add this block to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "vx": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://api.onememory.co/mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop after installing.
+
+### Windsurf
+
+```bash
+npx @vx-nyc/vx-mcp install windsurf
+```
+
+This writes the VX entry to `~/.codeium/windsurf/mcp_config.json` (same path
+on macOS, Linux, and Windows). Windsurf's Cascade agent will open your browser
+to sign in on first use.
+
+Manual equivalent:
+
+```json
+{
+  "mcpServers": {
+    "vx": {
+      "serverUrl": "https://api.onememory.co/mcp"
+    }
+  }
+}
+```
+
+### Cline
+
+```bash
+npx @vx-nyc/vx-mcp install cline
+```
+
+Config path: macOS
+`~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`,
+Windows `%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json`,
+Linux `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`.
+This targets the standard VS Code install of the Cline extension; Cline
+running inside VS Code Insiders, Cursor, or a portable profile uses a
+different path and needs manual setup.
+
+Manual equivalent:
+
+```json
+{
+  "mcpServers": {
+    "vx": {
+      "type": "streamableHttp",
+      "url": "https://api.onememory.co/mcp"
+    }
+  }
+}
+```
+
+### Zed
+
+```bash
+npx @vx-nyc/vx-mcp install zed
+```
+
+Config path: macOS/Linux `~/.config/zed/settings.json` (respects
+`$XDG_CONFIG_HOME`), Windows `%APPDATA%\Zed\settings.json`. Zed already
+prompts its own OAuth flow for a remote context server with no `Authorization`
+header configured, so no extra sign-in step is needed beyond approving it in
+Zed.
+
+Manual equivalent — add this under `context_servers` in `settings.json`:
+
+```json
+{
+  "context_servers": {
+    "vx": {
+      "url": "https://api.onememory.co/mcp"
+    }
+  }
+}
+```
+
+If your `settings.json` uses `//` comments, the installer leaves it untouched
+rather than risk corrupting it — it prints this snippet for you to paste in by
+hand instead.
+
+### VS Code + Copilot
+
+```bash
+npx @vx-nyc/vx-mcp install vscode
+```
+
+Config path: macOS `~/Library/Application Support/Code/User/mcp.json`,
+Windows `%APPDATA%\Code\User\mcp.json`, Linux `~/.config/Code/User/mcp.json`.
+This is VS Code's native MCP config, shared by GitHub Copilot Chat's agent
+mode — there's no separate Copilot-only config to write.
+
+Manual equivalent — note the top-level key is `servers`, not `mcpServers`:
+
+```json
+{
+  "servers": {
+    "vx": {
+      "type": "http",
+      "url": "https://api.onememory.co/mcp"
+    }
+  }
+}
 ```
 
 ### OpenClaw
@@ -284,6 +465,26 @@ context includes its subcontexts.
 If you have an existing per-device VX API key from a previous version, it is
 **not used** by v1 — clients connect over OAuth-authenticated HTTP instead.
 
+## Compartments — per-tool access
+
+`connect <client> --compartment <name>` binds that client's connection to a
+named compartment instead of a bare, unscoped endpoint. The compartment name
+travels as a `compartment` query parameter on the URL vx-mcp writes into that
+client's own config (or passes to its CLI) — there is no separate credential
+or local database vx-mcp keeps track of. `vx-mcp status` reads the same URL
+back out of each client's config to report what it's bound to, so the two
+never drift apart.
+
+vx-mcp itself does not mint credentials, call the VX REST API, or verify
+server-side enforcement — it is an installer, not a runtime. What it does
+guarantee, entirely at this layer, is that `connect` never writes a config
+with a missing or empty compartment: a connection is either explicitly scoped
+or refused outright, never silently unscoped.
+
+Plain `install` (without `--compartment`) still works exactly as before, for
+backward compatibility — but `status` will call it out as **UNSCOPED** so it's
+never a surprise which of your connected clients can read everything.
+
 ## Uninstall
 
 ```bash
@@ -292,9 +493,16 @@ npx @vx-nyc/vx-mcp uninstall cursor
 npx @vx-nyc/vx-mcp uninstall codex
 npx @vx-nyc/vx-mcp uninstall openclaw
 npx @vx-nyc/vx-mcp uninstall hermes
+npx @vx-nyc/vx-mcp uninstall claude-desktop
+npx @vx-nyc/vx-mcp uninstall windsurf
+npx @vx-nyc/vx-mcp uninstall cline
+npx @vx-nyc/vx-mcp uninstall zed
+npx @vx-nyc/vx-mcp uninstall vscode
 ```
 
-Each command removes the entry added by the corresponding `install`.
+Each of these removes only the `vx` entry it added — every other server in
+that config file, and the file itself, is left exactly as it was. Add
+`--dry-run` to preview the removal first.
 
 ## Bundled guidance
 
@@ -323,6 +531,28 @@ Recommended workflow:
 8. Use `vx_import_text` or `vx_import_batch` to migrate prior notes or exports.
 9. Never store secrets, tokens, private keys, or credentials.
 
+### Continuity: starting in one tool, finishing in another
+
+Anything already stored in VX is available to any connected client through
+`vx_recall`/`vx_context`, subject to that client's compartment — that is
+ambient continuity for existing knowledge, and it needs no extra setup beyond
+`connect`.
+
+For handing off a specific, current piece of work between tools, the bundled
+guidance above teaches each agent an explicit convention:
+
+1. **Hand off**: store one atomic memory in a `handoff/<slug>` context, and
+   have the agent tell you exactly what it stored.
+2. **Pick up**: in the other tool, recall that `handoff/<slug>` context, and
+   have the agent state plainly what it retrieved before acting on it.
+3. **Don't carry this**: ask the agent to delete the hand-off memory (or the
+   whole `handoff/<slug>` context) — one action, and it's gone.
+
+This is deliberately explicit rather than automatic: vx-mcp does not watch or
+capture what happens inside any connected tool, so nothing crosses over
+unless an agent is asked to store or recall it. Passive, ambient capture of
+an entire conversation as it happens is a separate, not-yet-shipped client.
+
 ## Tools
 
 The hosted MCP server exposes the same VX tool catalog you had in v0.x:
@@ -349,15 +579,27 @@ tools. See your client's tool list after installation.
 ## CLI
 
 ```bash
-vx-mcp install <all|claude|cursor|codex|openclaw|hermes>
-vx-mcp uninstall <claude|cursor|codex|openclaw|hermes>
+vx-mcp connect <claude|cursor|codex|openclaw|hermes|claude-desktop|windsurf|cline|zed|vscode> --compartment <name> [--dry-run]
+vx-mcp install <all|claude|cursor|codex|openclaw|hermes|claude-desktop|windsurf|cline|zed|vscode> [--dry-run]
+vx-mcp uninstall <claude|cursor|codex|openclaw|hermes|claude-desktop|windsurf|cline|zed|vscode> [--dry-run]
+vx-mcp status
 vx-mcp login <openclaw|hermes|all>
 vx-mcp smoke <openclaw|hermes>
 vx-mcp doctor
+vx-mcp detect [--json]
 vx-mcp clients
 vx-mcp --version
 vx-mcp --help
 ```
+
+`--dry-run` prints exactly what a `connect`/`install`/`uninstall` would
+change — a diff of the config file it would write — without touching disk.
+`detect` reports which supported clients are actually present on this machine
+(from a CLI on PATH, an installed app, or an existing config directory), so a
+GUI can offer "we found N tools — connect them?" instead of a blind picklist;
+`--json` emits the same data as machine-readable JSON. `status` reports every
+connected client and the compartment (if any) it's bound to — see
+"Compartments — per-tool access" above.
 
 ## Migrating from v0.x
 

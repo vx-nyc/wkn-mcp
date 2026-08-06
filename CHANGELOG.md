@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- `vx-mcp connect <client> --compartment <name>` binds one client's
+  connection to a named compartment. The compartment name is written into
+  that client's own connection URL (`?compartment=<name>`); `connect`
+  refuses to write any config without a valid, non-empty compartment name.
+- `vx-mcp status` reports every client's connection state and, for each
+  connected client, the compartment it's bound to — or flags it as
+  **UNSCOPED** when connected through a plain `install` with no compartment.
+- Bundled Claude Code, Codex, Hermes, and OpenClaw guidance now documents an
+  explicit hand-off convention (`handoff/<slug>` contexts) for continuity
+  between tools: hand off, pick up with the retrieved context stated
+  plainly, and a one-action "don't carry this" delete.
+- Five new install targets: `claude-desktop`, `windsurf`, `cline`, `zed`, and
+  `vscode` (VS Code + GitHub Copilot Chat), each writing the correct
+  per-OS config path and format (Claude Desktop bridges through `mcp-remote`
+  since its config only supports local stdio servers).
+- `vx-mcp detect` (with `--json`) reports which supported AI tools are
+  actually installed on this machine, independent of whether VX is
+  configured for them yet.
+- `--dry-run` on every `connect`/`install`/`uninstall` target prints a diff
+  of exactly what would change without writing anything.
+
 ### Fixed
 
 - OpenClaw installs now apply the `group:plugins` tool policy and compact
