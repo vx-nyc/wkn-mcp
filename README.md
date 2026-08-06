@@ -29,18 +29,16 @@ users should leave this unset.
 `@vx-nyc/vx-mcp` is published on **GitHub Packages** (`npm.pkg.github.com`), not
 the public npm registry.
 
-One-time registry setup:
+One-time registry and auth setup (GitHub Packages requires a token even for public packages):
 
 ```bash
 npm config set @vx-nyc:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken "$(gh auth token)"
 ```
 
-Authenticate with a GitHub token that has `read:packages`. If you use GitHub
-CLI, this is usually enough:
-
-```bash
-export NODE_AUTH_TOKEN=$(gh auth token)
-```
+If you use GitHub CLI, `gh auth login` must be done first. Without GitHub CLI,
+create a personal access token with `read:packages` and substitute it for
+`$(gh auth token)`.
 
 ### Connect one client to a named compartment
 
