@@ -142,7 +142,114 @@ export type InstallOptions = {
   /** When true, compute and describe the change but never touch disk or
    *  run a mutating command. */
   dryRun?: boolean;
+  /** Bind this connection to a named compartment (ONE-118). Only the
+   *  `connect` CLI command sets this, after `validateCompartmentName`
+   *  passes. Plain `install` leaves it undefined and writes the bare
+   *  `VX_MCP_URL`, exactly as it did before compartments existed. */
+  compartment?: string;
 };
+
+// ---------------------------------------------------------------------------
+// Compartments — per-tool access policy (ONE-118)
+//
+// vx-mcp is installer-only (see AGENTS.md): it does not mint credentials,
+// call the VX REST API, or verify server-side enforcement. What it *can*
+// guarantee, entirely from config it already writes, is this: every
+// connection made through `connect` carries an explicit, non-empty
+// compartment name in its URL, and `status` can always read that name back
+// out of the client's own config — no separate, driftable local cache.
+//
+// This exists because of a confirmed production footgun: an empty scope
+// (`scopeContextIds: []`) is normalized server-side to "grants everything",
+// not "grants nothing". vx-mcp cannot fix that normalization from this repo,
+// but it can make sure it is never the source of an empty or missing scope.
+// ---------------------------------------------------------------------------
+
+/** Query parameter carrying the compartment name on a client's connection
+ *  URL. The hosted VX MCP endpoint is expected to treat a missing or empty
+ *  value as deny-all, never as unscoped/allow-all. */
+export const VX_COMPARTMENT_PARAM = "compartment";
+
+/** Mirrors VX knowledge-context naming so a compartment can map directly
+ *  onto one: letters, numbers, `-`, `_`, and `/` for hierarchical names
+ *  (e.g. `work/deal-room`). */
+const COMPARTMENT_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9/_-]*$/;
+
+export type CompartmentValidation =
+  | { ok: true; name: string }
+  | { ok: false; error: string };
+
+/**
+ * The one gate `connect` must pass through before writing anything. There is
+ * no "unscoped" result here: a missing, blank, or invalid name is always
+ * rejected. This is what makes "refuse to write a config with no
+ * compartment" true in practice rather than just documented.
+ */
+export function validateCompartmentName(value: string | undefined): CompartmentValidation {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) {
+    return {
+      ok: false,
+      error:
+        "Missing --compartment <name>. Every connection must be bound to a named compartment — there is no unscoped default.",
+    };
+  }
+  if (!COMPARTMENT_NAME_PATTERN.test(trimmed)) {
+    return {
+      ok: false,
+      error: `Invalid compartment name "${trimmed}". Use letters, numbers, "-", "_", or "/" (e.g. "personal", "work/deal-room").`,
+    };
+  }
+  return { ok: true, name: trimmed };
+}
+
+/**
+ * Append `?compartment=<name>` to a VX MCP endpoint URL. Throws on an empty
+ * name so this function can never itself produce an unscoped URL — the same
+ * guarantee `validateCompartmentName` gives at the CLI layer, enforced again
+ * here as the last function standing before a config write.
+ */
+export function buildCompartmentScopedUrl(url: string, compartment: string): string {
+  const trimmed = compartment.trim();
+  if (!trimmed) {
+    throw new Error("buildCompartmentScopedUrl requires a non-empty compartment name.");
+  }
+  const parsed = new URL(url);
+  parsed.searchParams.set(VX_COMPARTMENT_PARAM, trimmed);
+  return parsed.toString();
+}
+
+/** Read the compartment back out of a URL already written to a client's own
+ *  config/CLI state, so `status` never needs a second source of truth that
+ *  could drift from what a client actually has. */
+export function extractCompartment(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).searchParams.get(VX_COMPARTMENT_PARAM);
+  } catch {
+    return null;
+  }
+}
+
+/** True for the canonical `VX_MCP_URL`, or that URL with any query string
+ *  appended (e.g. a compartment-scoped connect URL) — never true for an
+ *  unrelated endpoint. Used where existing code compared a stored URL to
+ *  `VX_MCP_URL` with strict equality, which a compartment suffix would
+ *  otherwise fail. */
+function isVxMcpUrl(url: string): boolean {
+  return url === VX_MCP_URL || url.startsWith(`${VX_MCP_URL}?`);
+}
+
+/** Every installX routes its outgoing URL through here: the bare
+ *  `VX_MCP_URL` for a plain `install` (unchanged v1 behavior), or the
+ *  compartment-scoped URL when called from `connect`. `options.compartment`
+ *  is expected to already be validated by the CLI layer; this function
+ *  stays permissive (silently falls back to the bare URL on a blank value)
+ *  so it is never what crashes a caller — enforcement lives in `connect`. */
+function installUrl(options: InstallOptions): string {
+  const compartment = options.compartment?.trim();
+  return compartment ? buildCompartmentScopedUrl(VX_MCP_URL, compartment) : VX_MCP_URL;
+}
 
 function repoRootFromModule(): string {
   return resolve(__dirname, "..");
@@ -459,14 +566,14 @@ function openClawInstallProfileArgs(deps: InstallerDeps): string[] {
   return [];
 }
 
-function openClawMcpAddArgs(profileArgs: string[] = []): string[] {
+function openClawMcpAddArgs(url: string = VX_MCP_URL, profileArgs: string[] = []): string[] {
   return [
     ...profileArgs,
     "mcp",
     "add",
     VX_MCP_SERVER_NAME,
     "--url",
-    VX_MCP_URL,
+    url,
     "--transport",
     "streamable-http",
     "--auth",
@@ -1235,7 +1342,7 @@ type JsonMcpClientSpec<TFile> = {
   label: string;
   resolvePath: (deps: InstallerDeps) => string | null;
   unsupportedNote: string;
-  upsert: (current: TFile | null) => TFile;
+  upsert: (current: TFile | null, url: string) => TFile;
   remove: (current: TFile | null) => TFile;
   afterInstallNotes: string[];
 };
@@ -1253,17 +1360,18 @@ function installJsonMcpClient<TFile>(
   }
 
   const dryRun = options.dryRun ?? false;
+  const url = installUrl(options);
   const raw = deps.existsSync(path) ? readText(path, deps).trim() : "";
   const current = raw ? readJsonFile<TFile>(path, deps) : null;
   if (raw && current === null) {
     notes.push(
       `${path} exists but could not be parsed as JSON; leaving it untouched to avoid corrupting it. Add this entry by hand instead:`,
     );
-    notes.push(formatJsonFile(spec.upsert(null)));
+    notes.push(formatJsonFile(spec.upsert(null, url)));
     return notes;
   }
 
-  const next = spec.upsert(current);
+  const next = spec.upsert(current, url);
   const before = current === null ? null : formatJsonFile(current);
   notes.push(
     writeOrPreview(
@@ -1272,7 +1380,9 @@ function installJsonMcpClient<TFile>(
       formatJsonFile(next),
       deps,
       dryRun,
-      `Wrote ${spec.label} MCP config at ${path}`,
+      options.compartment
+        ? `Wrote ${spec.label} MCP config at ${path} (compartment: ${options.compartment})`
+        : `Wrote ${spec.label} MCP config at ${path}`,
     ),
   );
   notes.push(...spec.afterInstallNotes);
@@ -1324,7 +1434,7 @@ const claudeDesktopSpec: JsonMcpClientSpec<ClaudeDesktopMcpFile> = {
   resolvePath: claudeDesktopConfigPath,
   unsupportedNote:
     "Claude Desktop's config location is only confidently known for macOS and Windows; skipping on this platform (Claude Desktop has no Linux build).",
-  upsert: (current) => upsertClaudeDesktopVxEntry(current),
+  upsert: (current, url) => upsertClaudeDesktopVxEntry(current, url),
   remove: (current) => removeClaudeDesktopVxEntry(current),
   afterInstallNotes: [
     `Claude Desktop only supports local (stdio) MCP servers, so this entry runs the \`mcp-remote\` bridge (via npx) to reach ${VX_MCP_URL} over Streamable HTTP.`,
@@ -1336,7 +1446,7 @@ const windsurfSpec: JsonMcpClientSpec<WindsurfMcpFile> = {
   label: "Windsurf",
   resolvePath: (deps) => windsurfConfigPath(deps),
   unsupportedNote: "Windsurf's config location could not be determined on this platform; skipping.",
-  upsert: (current) => upsertWindsurfVxEntry(current),
+  upsert: (current, url) => upsertWindsurfVxEntry(current, url),
   remove: (current) => removeWindsurfVxEntry(current),
   afterInstallNotes: [
     "Restart Windsurf (or reload the Cascade panel); it will open your browser to sign in via OAuth on first VX tool use.",
@@ -1348,7 +1458,7 @@ const clineSpec: JsonMcpClientSpec<ClineMcpFile> = {
   resolvePath: clineMcpSettingsPath,
   unsupportedNote:
     "Cline's settings path is derived from VS Code's per-user profile directory, which could not be determined on this platform; skipping.",
-  upsert: (current) => upsertClineVxEntry(current),
+  upsert: (current, url) => upsertClineVxEntry(current, url),
   remove: (current) => removeClineVxEntry(current),
   afterInstallNotes: [
     "Reload VS Code (or the Cline panel); it will open your browser to sign in via OAuth on first VX tool use.",
@@ -1361,7 +1471,7 @@ const vsCodeSpec: JsonMcpClientSpec<VsCodeMcpFile> = {
   resolvePath: vsCodeMcpJsonPath,
   unsupportedNote:
     "VS Code's per-user config directory could not be determined on this platform; skipping.",
-  upsert: (current) => upsertVsCodeVxEntry(current),
+  upsert: (current, url) => upsertVsCodeVxEntry(current, url),
   remove: (current) => removeVsCodeVxEntry(current),
   afterInstallNotes: [
     "This is VS Code's native MCP config, shared by GitHub Copilot Chat's agent mode — no separate Copilot-only config is needed.",
@@ -1373,7 +1483,7 @@ const zedSpec: JsonMcpClientSpec<ZedSettingsFile> = {
   label: "Zed",
   resolvePath: zedSettingsPath,
   unsupportedNote: "Zed's settings location could not be determined on this platform; skipping.",
-  upsert: (current) => upsertZedVxEntry(current),
+  upsert: (current, url) => upsertZedVxEntry(current, url),
   remove: (current) => removeZedVxEntry(current),
   afterInstallNotes: [
     "Zed runs its own OAuth flow the first time it calls a VX tool, since no Authorization header is configured.",
@@ -1470,6 +1580,7 @@ export function installClaude(
 ): string[] {
   const notes: string[] = [];
   const dryRun = options.dryRun ?? false;
+  const url = installUrl(options);
 
   const claudeCommandsDir = join(deps.homedir(), ".claude", "commands");
   const commandPath = join(claudeCommandsDir, "vx-memory.md");
@@ -1489,7 +1600,7 @@ export function installClaude(
       "Claude Code CLI (`claude`) was not found on PATH. Install Claude Code, then run:",
     );
     notes.push(
-      `  claude mcp add --scope user --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}`,
+      `  claude mcp add --scope user --transport http ${VX_MCP_SERVER_NAME} ${url}`,
     );
     notes.push(
       "Claude Code will open your browser to sign in via OAuth on first use.",
@@ -1502,7 +1613,7 @@ export function installClaude(
       `[dry-run] Would run: claude mcp remove --scope user ${VX_MCP_SERVER_NAME} (pre-flight cleanup, ignoring errors)`,
     );
     notes.push(
-      `[dry-run] Would run: claude mcp add --scope user --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}`,
+      `[dry-run] Would run: claude mcp add --scope user --transport http ${VX_MCP_SERVER_NAME} ${url}`,
     );
     return notes;
   }
@@ -1525,14 +1636,14 @@ export function installClaude(
       "--transport",
       "http",
       VX_MCP_SERVER_NAME,
-      VX_MCP_URL,
+      url,
     ],
     { encoding: "utf8" },
   );
 
   if (addResult.status === 0) {
     notes.push(
-      `Registered VX MCP server with Claude Code: \`claude mcp add --scope user --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}\``,
+      `Registered VX MCP server with Claude Code: \`claude mcp add --scope user --transport http ${VX_MCP_SERVER_NAME} ${url}\``,
     );
     notes.push(
       "On first tool call, Claude Code will open your browser to sign in.",
@@ -1544,7 +1655,7 @@ export function installClaude(
       }`,
     );
     notes.push(
-      `Retry manually: claude mcp add --scope user --transport http ${VX_MCP_SERVER_NAME} ${VX_MCP_URL}`,
+      `Retry manually: claude mcp add --scope user --transport http ${VX_MCP_SERVER_NAME} ${url}`,
     );
   }
 
@@ -1613,7 +1724,7 @@ export function installCursor(
   const notes: string[] = [];
   const path = cursorMcpJsonPath(deps);
   const current = readJsonFile<CursorMcpFile>(path, deps);
-  const next = upsertCursorVxEntry(current);
+  const next = upsertCursorVxEntry(current, installUrl(options));
   notes.push(
     writeOrPreview(
       path,
@@ -1621,7 +1732,9 @@ export function installCursor(
       formatJsonFile(next),
       deps,
       options.dryRun ?? false,
-      `Wrote Cursor MCP config at ${path}`,
+      options.compartment
+        ? `Wrote Cursor MCP config at ${path} (compartment: ${options.compartment})`
+        : `Wrote Cursor MCP config at ${path}`,
     ),
   );
   notes.push(
@@ -1685,7 +1798,7 @@ export function installCodex(
 
   const configPath = join(home, "config.toml");
   const before = deps.existsSync(configPath) ? readText(configPath, deps) : null;
-  const updated = upsertCodexManagedBlock(before ?? "", buildCodexTomlBlock());
+  const updated = upsertCodexManagedBlock(before ?? "", buildCodexTomlBlock(installUrl(options)));
   notes.push(
     writeOrPreview(
       configPath,
@@ -1693,7 +1806,9 @@ export function installCodex(
       updated,
       deps,
       dryRun,
-      `Updated Codex MCP config at ${configPath}`,
+      options.compartment
+        ? `Updated Codex MCP config at ${configPath} (compartment: ${options.compartment})`
+        : `Updated Codex MCP config at ${configPath}`,
     ),
   );
   notes.push(
@@ -1859,7 +1974,7 @@ export function installHermes(
 
   const configPath = hermesConfigPath(deps);
   const before = deps.existsSync(configPath) ? readText(configPath, deps) : null;
-  const updated = upsertHermesManagedBlock(before ?? "");
+  const updated = upsertHermesManagedBlock(before ?? "", buildHermesManagedBlock(installUrl(options)));
   notes.push(
     writeOrPreview(
       configPath,
@@ -1867,7 +1982,9 @@ export function installHermes(
       updated,
       deps,
       dryRun,
-      `Updated Hermes MCP config at ${configPath}`,
+      options.compartment
+        ? `Updated Hermes MCP config at ${configPath} (compartment: ${options.compartment})`
+        : `Updated Hermes MCP config at ${configPath}`,
     ),
   );
   notes.push(
@@ -2363,7 +2480,9 @@ function openClawVxConfig(deps: InstallerDeps): { path: string; url: string; mis
     const config = readJsonFile<OpenClawConfigFile>(path, deps);
     const entry = config?.mcp?.servers?.[VX_MCP_SERVER_NAME];
     const url = entry && typeof entry === "object" ? (entry as OpenClawMcpServerEntry).url : "";
-    if (typeof url === "string" && /\/mcp\/?$/i.test(url)) {
+    // Tolerate a trailing `?compartment=...` (or any other query string) so a
+    // compartment-scoped `connect` is still recognized as a VX MCP entry.
+    if (typeof url === "string" && /\/mcp\/?(\?[^\s]*)?$/i.test(url)) {
       return {
         path,
         url,
@@ -2416,7 +2535,8 @@ export function installOpenClaw(
 ): string[] {
   const notes: string[] = [];
   const dryRun = options.dryRun ?? false;
-  const snippet = JSON.stringify(buildOpenClawPluginConfig(), null, 2);
+  const url = installUrl(options);
+  const snippet = JSON.stringify(buildOpenClawPluginConfig(url), null, 2);
 
   const openclawCli = findCli("openclaw", deps);
   if (!openclawCli) {
@@ -2429,7 +2549,7 @@ export function installOpenClaw(
       } else if (dryRun) {
         const profileArgs = openClawInstallProfileArgs(deps);
         notes.push(
-          `[dry-run] Would run: ${openClawCommand(openClawMcpAddArgs(profileArgs))}`,
+          `[dry-run] Would run: ${openClawCommand(openClawMcpAddArgs(url, profileArgs))}`,
         );
         notes.push(
           "[dry-run] Would run: openclaw config patch --stdin to enable plugin tools and compact tool search.",
@@ -2440,11 +2560,11 @@ export function installOpenClaw(
         return notes;
       } else {
         const profileArgs = openClawInstallProfileArgs(deps);
-        const addArgs = ["-y", "openclaw", ...openClawMcpAddArgs(profileArgs)];
+        const addArgs = ["-y", "openclaw", ...openClawMcpAddArgs(url, profileArgs)];
         const addResult = deps.spawnSync(npxCli, addArgs, { encoding: "utf8" });
         if (addResult.status === 0) {
           notes.push(
-            `Configured OpenClaw VX MCP through npx: \`${openClawCommand(openClawMcpAddArgs(profileArgs))}\``,
+            `Configured OpenClaw VX MCP through npx: \`${openClawCommand(openClawMcpAddArgs(url, profileArgs))}\``,
           );
           notes.push(
             `Exposed the core VX MCP tools for OpenClaw: ${RECOMMENDED_OPENCLAW_VX_TOOLS.join(", ")}`,
@@ -2477,7 +2597,7 @@ export function installOpenClaw(
           }`,
         );
         notes.push(
-          `Retry manually: ${openClawCommand(openClawMcpAddArgs(profileArgs))}`,
+          `Retry manually: ${openClawCommand(openClawMcpAddArgs(url, profileArgs))}`,
         );
       }
     }
@@ -2495,6 +2615,11 @@ export function installOpenClaw(
     notes.push(
       `[dry-run] Would run: openclaw mcp tools ${VX_MCP_SERVER_NAME} --include ${RECOMMENDED_OPENCLAW_VX_TOOLS.join(",")}`,
     );
+    if (options.compartment) {
+      notes.push(
+        `[dry-run] Would run: openclaw ${openClawMcpAddArgs(url, []).join(" ")} (binds this connection to compartment "${options.compartment}")`,
+      );
+    }
     notes.push(
       "[dry-run] Would run: openclaw config patch --stdin to enable plugin tools and compact tool search.",
     );
@@ -2537,6 +2662,21 @@ export function installOpenClaw(
       notes.push(
         `Run manually: openclaw mcp tools ${VX_MCP_SERVER_NAME} --include ${RECOMMENDED_OPENCLAW_VX_TOOLS.join(",")}`,
       );
+    }
+
+    if (options.compartment) {
+      const addArgs = openClawMcpAddArgs(url, []);
+      const addResult = deps.spawnSync(openclawCli, addArgs, { encoding: "utf8" });
+      if (addResult.status === 0) {
+        notes.push(`Bound OpenClaw's VX MCP connection to compartment "${options.compartment}".`);
+      } else {
+        notes.push(
+          `OpenClaw plugin installed, but scoping the connection to compartment "${options.compartment}" failed: ${
+            addResult.stderr?.trim() || addResult.stdout?.trim() || "unknown error"
+          }`,
+        );
+        notes.push(`Retry manually: openclaw ${addArgs.join(" ")}`);
+      }
     }
   } else {
     notes.push(
@@ -2717,7 +2857,7 @@ export function getClientReadiness(
       const path = cursorMcpJsonPath(deps);
       const current = readJsonFile<CursorMcpFile>(path, deps);
       const entry = current?.mcpServers?.[VX_MCP_SERVER_NAME];
-      if (entry && "type" in entry && entry.type === "http" && entry.url === VX_MCP_URL) {
+      if (entry && "type" in entry && entry.type === "http" && typeof entry.url === "string" && isVxMcpUrl(entry.url)) {
         return {
           target,
           label: CLIENT_LABELS.cursor,
@@ -2753,7 +2893,7 @@ export function getClientReadiness(
     case "openclaw": {
       const config = openClawVxConfig(deps);
       const cli = findCli("openclaw", deps);
-      if (config && config.url !== VX_MCP_URL) {
+      if (config && !isVxMcpUrl(config.url)) {
         return {
           target,
           label: CLIENT_LABELS.openclaw,
@@ -2872,6 +3012,158 @@ export function getClientReadiness(
         ],
       };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Status — per-tool access (ONE-118)
+//
+// Answers "what can <client> see?" in one command. Every client's
+// compartment lives inside the same URL `install`/`connect` already wrote
+// into that client's own config — there is no second, vx-mcp-owned record
+// to keep in sync. `status` just reads each config back and extracts the
+// `compartment` query parameter from whatever URL string it finds.
+// ---------------------------------------------------------------------------
+
+/** Pull a VX MCP URL out of one JSON server-map entry, whatever shape that
+ *  client uses for it: a plain `url`/`serverUrl` field, or (Claude Desktop)
+ *  a URL buried in the `mcp-remote` bridge's `args`. */
+function extractUrlFromJsonEntry(entry: unknown): string | null {
+  if (!entry || typeof entry !== "object") return null;
+  const record = entry as Record<string, unknown>;
+  if (typeof record.url === "string") return record.url;
+  if (typeof record.serverUrl === "string") return record.serverUrl;
+  if (Array.isArray(record.args)) {
+    const found = record.args.find(
+      (arg): arg is string => typeof arg === "string" && arg.startsWith(VX_MCP_URL),
+    );
+    if (found) return found;
+  }
+  return null;
+}
+
+function jsonClientConfiguredUrl<TFile>(
+  spec: Pick<JsonMcpClientSpec<TFile>, "resolvePath">,
+  serversKey: string,
+  deps: InstallerDeps,
+): string | null {
+  const path = spec.resolvePath(deps);
+  if (!path) return null;
+  const current = readJsonFile<Record<string, unknown>>(path, deps);
+  const servers = current?.[serversKey] as Record<string, unknown> | undefined;
+  return extractUrlFromJsonEntry(servers?.[VX_MCP_SERVER_NAME]);
+}
+
+function codexConfiguredUrl(deps: InstallerDeps): string | null {
+  const configPath = join(codexHome(deps), "config.toml");
+  if (!deps.existsSync(configPath)) return null;
+  const content = readText(configPath, deps);
+  const match = content.match(/\[mcp_servers\.vx\][^[]*?url\s*=\s*"([^"]+)"/);
+  return match?.[1] ?? null;
+}
+
+function hermesConfiguredUrl(deps: InstallerDeps): string | null {
+  const configPath = hermesConfigPath(deps);
+  if (!deps.existsSync(configPath)) return null;
+  const content = readText(configPath, deps);
+  const serverName = hermesMcpServerName(deps);
+  const match = content.match(new RegExp(`${serverName}:\\s*\\n\\s*url:\\s*"([^"]+)"`));
+  return match?.[1] ?? null;
+}
+
+/** Parses the `vx: <url> ...` line `claude mcp list` prints, the same shape
+ *  `claudeMcpListStatus` already matches against for readiness. */
+function claudeConfiguredUrl(deps: InstallerDeps): string | null {
+  const cli = findCli("claude", deps);
+  if (!cli) return null;
+  const result = deps.spawnSync(cli, ["mcp", "list"], { encoding: "utf8", timeout: 10000 });
+  if (result.status !== 0) return null;
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  const line = output
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(`${VX_MCP_SERVER_NAME}:`) && entry.includes(VX_MCP_URL));
+  if (!line) return null;
+  const match = line.match(/(https?:\/\/\S+)/);
+  return match?.[1] ?? null;
+}
+
+function configuredVxUrl(target: SupportedClientTarget, deps: InstallerDeps): string | null {
+  switch (target) {
+    case "claude":
+      return claudeConfiguredUrl(deps);
+    case "cursor":
+      return extractUrlFromJsonEntry(
+        readJsonFile<CursorMcpFile>(cursorMcpJsonPath(deps), deps)?.mcpServers?.[VX_MCP_SERVER_NAME],
+      );
+    case "codex":
+      return codexConfiguredUrl(deps);
+    case "openclaw":
+      return openClawVxConfig(deps)?.url ?? null;
+    case "hermes":
+      return hermesConfiguredUrl(deps);
+    case "claude-desktop":
+      return jsonClientConfiguredUrl(claudeDesktopSpec, "mcpServers", deps);
+    case "windsurf":
+      return jsonClientConfiguredUrl(windsurfSpec, "mcpServers", deps);
+    case "cline":
+      return jsonClientConfiguredUrl(clineSpec, "mcpServers", deps);
+    case "vscode":
+      return jsonClientConfiguredUrl(vsCodeSpec, "servers", deps);
+    case "zed":
+      return jsonClientConfiguredUrl(zedSpec, "context_servers", deps);
+  }
+}
+
+export type ClientAccessStatus = {
+  target: SupportedClientTarget;
+  label: string;
+  connected: boolean;
+  /** The bound compartment name, or `null` when either not connected or
+   *  connected without one (a legacy/unscoped `install`). */
+  compartment: string | null;
+  url: string | null;
+};
+
+/** The single source `status` (and anything else asking "what can this
+ *  client see?") reads from: whatever URL is actually sitting in that
+ *  client's own config or CLI state right now. */
+export function getClientAccessStatus(
+  target: SupportedClientTarget,
+  deps: InstallerDeps = defaultDeps,
+): ClientAccessStatus {
+  const label = CLIENT_LABELS[target];
+  const url = configuredVxUrl(target, deps);
+  if (!url) {
+    return { target, label, connected: false, compartment: null, url: null };
+  }
+  return { target, label, connected: true, compartment: extractCompartment(url), url };
+}
+
+export function buildStatusReport(deps: InstallerDeps = defaultDeps): string[] {
+  const rows = SUPPORTED_CLIENT_TARGETS.map((target) => getClientAccessStatus(target, deps));
+  const lines = [`VX MCP per-client access (${VX_MCP_URL})`, ""];
+  for (const row of rows) {
+    if (!row.connected) {
+      lines.push(`- ${row.label}: not connected`);
+      continue;
+    }
+    if (row.compartment) {
+      lines.push(`- ${row.label}: connected — compartment "${row.compartment}"`);
+    } else {
+      lines.push(
+        `- ${row.label}: connected — UNSCOPED (no named compartment; can read everything this account grants)`,
+      );
+      lines.push(`    Run: vx-mcp connect ${row.target} --compartment <name> to scope it`);
+    }
+  }
+  lines.push("");
+  lines.push(
+    "Compartments are carried in each client's own connection URL; the hosted VX MCP endpoint is responsible for enforcing them.",
+  );
+  lines.push(
+    "vx-mcp only writes client config and reads it back here — it does not store credentials or verify enforcement itself.",
+  );
+  return lines;
 }
 
 export function doctor(deps: InstallerDeps = defaultDeps): string[] {
@@ -3061,22 +3353,30 @@ const USAGE = [
   `Usage: vx-mcp <command> [target] [--dry-run] [--json]`,
   ``,
   `Commands:`,
+  `  connect <${ALL_TARGETS_USAGE}> --compartment <name>`,
+  `                                             Wire up one client, scoped to a named compartment`,
   `  install <all|${ALL_TARGETS_USAGE}>`,
-  `                                             Wire up clients to ${VX_MCP_URL}`,
+  `                                             Wire up clients to ${VX_MCP_URL} (no compartment)`,
   `  uninstall <${ALL_TARGETS_USAGE}>`,
   `                                             Remove the VX MCP entry`,
+  `  status                                    Show every connected client and its bound compartment`,
   `  login <openclaw|hermes|all>               Authorize OAuth MCP clients that support CLI login`,
   `  smoke <openclaw|hermes>                   Verify MCP OAuth/tools/model readiness before a live agent turn`,
   `  doctor                                    Report local VX MCP readiness`,
   `  detect                                    Report which supported AI tools are installed on this machine`,
   `  clients                                   List supported clients`,
-  `  --dry-run                                 With install/uninstall: print exactly what would change, write nothing`,
+  `  --compartment <name>                      With connect: the named compartment to bind (required)`,
+  `  --dry-run                                 With connect/install/uninstall: print exactly what would change, write nothing`,
   `  --json                                    With detect: emit machine-readable JSON`,
   `  --version, -v                             Print package version`,
   `  --help, -h                                Show this message`,
   ``,
   `OAuth happens automatically. Your client will open your browser to sign`,
   `in on the first VX tool call. No API key is needed.`,
+  ``,
+  `Every connect requires a named compartment — there is no unscoped default.`,
+  `An empty or missing compartment is refused rather than written, because an`,
+  `unscoped connection can read everything the account grants.`,
 ].join("\n");
 
 function readPackageVersion(deps: InstallerDeps): string {
@@ -3097,13 +3397,26 @@ export function isSupportedClient(value: string): value is SupportedClientTarget
   return (SUPPORTED_CLIENT_TARGETS as readonly string[]).includes(value);
 }
 
+/** Pulls a `--flag <value>` pair out of argv, returning the value and the
+ *  remaining args with both the flag and its value removed. Used for
+ *  `--compartment <name>`, which (unlike `--dry-run`/`--json`) takes a value
+ *  rather than being a bare boolean switch. */
+function extractFlagValue(argv: string[], flag: string): { value: string | undefined; rest: string[] } {
+  const index = argv.indexOf(flag);
+  if (index === -1) return { value: undefined, rest: argv };
+  const value = argv[index + 1];
+  const rest = [...argv.slice(0, index), ...argv.slice(index + 2)];
+  return { value, rest };
+}
+
 export async function handleCli(
   argv: string[],
   deps: InstallerDeps = defaultDeps,
 ): Promise<boolean> {
-  const dryRun = argv.includes("--dry-run");
-  const json = argv.includes("--json");
-  const positional = argv.filter((arg) => arg !== "--dry-run" && arg !== "--json");
+  const { value: compartmentArg, rest: afterCompartment } = extractFlagValue(argv, "--compartment");
+  const dryRun = afterCompartment.includes("--dry-run");
+  const json = afterCompartment.includes("--json");
+  const positional = afterCompartment.filter((arg) => arg !== "--dry-run" && arg !== "--json");
   const [command, target] = positional;
 
   if (!command || command === "--help" || command === "-h" || command === "help") {
@@ -3127,6 +3440,45 @@ export async function handleCli(
   if (command === "doctor" || command === "readiness") {
     for (const line of doctor(deps)) {
       console.log(line);
+    }
+    return true;
+  }
+
+  if (command === "status") {
+    for (const line of buildStatusReport(deps)) {
+      console.log(line);
+    }
+    return true;
+  }
+
+  if (command === "connect") {
+    if (!target || !isSupportedClient(target)) {
+      console.error(
+        `Unknown target ${target ? `\`${target}\`` : "(missing)"}. Supported: ${SUPPORTED_CLIENT_TARGETS.join(", ")}.`,
+      );
+      printHelp();
+      return true;
+    }
+
+    const validation = validateCompartmentName(compartmentArg);
+    if (!validation.ok) {
+      console.error(validation.error);
+      console.error(
+        "Refusing to connect without a named compartment: an unscoped connection can read everything this account grants.",
+      );
+      process.exitCode = 1;
+      return true;
+    }
+
+    const notes = runInstall(target, deps, { dryRun, compartment: validation.name });
+    console.log(
+      `${dryRun ? "Previewed connecting" : "Connected"} ${CLIENT_LABELS[target]} scoped to compartment "${validation.name}".`,
+    );
+    for (const note of notes) {
+      console.log(`- ${note}`);
+    }
+    if (!dryRun) {
+      console.log(`Run \`vx-mcp status\` to confirm what ${CLIENT_LABELS[target]} can now see.`);
     }
     return true;
   }

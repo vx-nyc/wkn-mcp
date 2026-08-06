@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildCodexTomlBlock,
+  buildCompartmentScopedUrl,
   buildHermesManagedBlock,
   buildOpenClawPluginConfig,
+  buildStatusReport,
   CODEX_BLOCK_START,
   CODEX_BLOCK_END,
   detectClients,
   doctor,
+  extractCompartment,
   formatDetectReport,
+  getClientAccessStatus,
   getClientReadiness,
   HERMES_BLOCK_START,
   handleCli,
@@ -22,6 +26,7 @@ import {
   installVsCode,
   installWindsurf,
   installZed,
+  validateCompartmentName,
   removeClaudeDesktopVxEntry,
   removeClineVxEntry,
   removeCursorVxEntry,
@@ -2454,5 +2459,378 @@ describe("install all includes every new client", () => {
     expect(notes).toContain("Cline");
     expect(notes).toContain("Zed");
     expect(notes).toContain("VS Code + Copilot");
+  });
+});
+
+describe("compartment helpers (ONE-118)", () => {
+  it("validateCompartmentName rejects missing, blank, and invalid names", () => {
+    expect(validateCompartmentName(undefined)).toMatchObject({ ok: false });
+    expect(validateCompartmentName("")).toMatchObject({ ok: false });
+    expect(validateCompartmentName("   ")).toMatchObject({ ok: false });
+    expect(validateCompartmentName("bad name!")).toMatchObject({ ok: false });
+    expect(validateCompartmentName("has space")).toMatchObject({ ok: false });
+  });
+
+  it("validateCompartmentName accepts simple and hierarchical names", () => {
+    expect(validateCompartmentName("personal")).toEqual({ ok: true, name: "personal" });
+    expect(validateCompartmentName("work/deal-room")).toEqual({
+      ok: true,
+      name: "work/deal-room",
+    });
+    expect(validateCompartmentName("  personal  ")).toEqual({ ok: true, name: "personal" });
+  });
+
+  it("buildCompartmentScopedUrl appends the compartment query param", () => {
+    expect(buildCompartmentScopedUrl(VX_URL, "personal")).toBe(`${VX_URL}?compartment=personal`);
+  });
+
+  it("buildCompartmentScopedUrl throws rather than ever producing an unscoped URL", () => {
+    expect(() => buildCompartmentScopedUrl(VX_URL, "")).toThrow();
+    expect(() => buildCompartmentScopedUrl(VX_URL, "   ")).toThrow();
+  });
+
+  it("extractCompartment round-trips through buildCompartmentScopedUrl, including hierarchical names", () => {
+    const scoped = buildCompartmentScopedUrl(VX_URL, "work/deal-room");
+    expect(extractCompartment(scoped)).toBe("work/deal-room");
+  });
+
+  it("extractCompartment returns null for an unscoped URL or garbage input", () => {
+    expect(extractCompartment(VX_URL)).toBeNull();
+    expect(extractCompartment(null)).toBeNull();
+    expect(extractCompartment(undefined)).toBeNull();
+    expect(extractCompartment("not a url")).toBeNull();
+  });
+});
+
+describe("handleCli connect", () => {
+  it("refuses to write any config when --compartment is missing", async () => {
+    const deps = createDeps();
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    process.exitCode = undefined;
+
+    await handleCli(["connect", "cursor"], deps);
+
+    expect(existsSync(join(deps.homedir(), ".cursor", "mcp.json"))).toBe(false);
+    expect(err.mock.calls.map((c) => c.join(" ")).join("\n")).toContain(
+      "there is no unscoped default",
+    );
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+  });
+
+  it("refuses to write any config when --compartment is blank", async () => {
+    const deps = createDeps();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    process.exitCode = undefined;
+
+    await handleCli(["connect", "cursor", "--compartment", "   "], deps);
+
+    expect(existsSync(join(deps.homedir(), ".cursor", "mcp.json"))).toBe(false);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+  });
+
+  it("refuses an invalid compartment name without writing anything", async () => {
+    const deps = createDeps();
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    process.exitCode = undefined;
+
+    await handleCli(["connect", "cursor", "--compartment", "bad name!"], deps);
+
+    expect(existsSync(join(deps.homedir(), ".cursor", "mcp.json"))).toBe(false);
+    expect(err.mock.calls.map((c) => c.join(" ")).join("\n")).toContain("Invalid compartment name");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+  });
+
+  it("writes a compartment-scoped URL for a JSON client and reports success", async () => {
+    const deps = createDeps();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    process.exitCode = undefined;
+
+    await handleCli(["connect", "cursor", "--compartment", "personal"], deps);
+
+    const parsed = JSON.parse(readFileSync(join(deps.homedir(), ".cursor", "mcp.json"), "utf8"));
+    expect(parsed.mcpServers.vx).toEqual({ type: "http", url: `${VX_URL}?compartment=personal` });
+    expect(log.mock.calls.map((c) => c.join(" ")).join("\n")).toContain(
+      'Connected Cursor scoped to compartment "personal"',
+    );
+    expect(process.exitCode).toBe(undefined);
+  });
+
+  it("supports hierarchical compartment names end to end", async () => {
+    const deps = createDeps();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await handleCli(["connect", "cursor", "--compartment", "work/deal-room"], deps);
+
+    const parsed = JSON.parse(readFileSync(join(deps.homedir(), ".cursor", "mcp.json"), "utf8"));
+    expect(extractCompartment(parsed.mcpServers.vx.url)).toBe("work/deal-room");
+  });
+
+  it("changing the compartment later just re-runs connect with the new name", async () => {
+    const deps = createDeps();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await handleCli(["connect", "cursor", "--compartment", "personal"], deps);
+    await handleCli(["connect", "cursor", "--compartment", "work"], deps);
+
+    const parsed = JSON.parse(readFileSync(join(deps.homedir(), ".cursor", "mcp.json"), "utf8"));
+    expect(extractCompartment(parsed.mcpServers.vx.url)).toBe("work");
+    // Idempotent: still exactly one vx entry, no duplicates.
+    expect(Object.keys(parsed.mcpServers)).toEqual(["vx"]);
+  });
+
+  it("--dry-run previews a connect without writing anything", async () => {
+    const deps = createDeps();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await handleCli(["connect", "cursor", "--compartment", "personal", "--dry-run"], deps);
+
+    expect(existsSync(join(deps.homedir(), ".cursor", "mcp.json"))).toBe(false);
+    expect(log.mock.calls.map((c) => c.join(" ")).join("\n")).toContain("[dry-run] Would create");
+  });
+
+  it("rejects an unknown connect target", async () => {
+    const deps = createDeps();
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await handleCli(["connect", "not-a-client", "--compartment", "personal"], deps);
+
+    expect(err.mock.calls.map((c) => c.join(" ")).join("\n")).toContain("Unknown target");
+  });
+
+  it("scopes Claude Code's `claude mcp add` URL to the compartment", async () => {
+    const deps = createDeps();
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "/usr/local/bin/claude\n" }, // findCli
+      { status: 0 }, // mcp remove (pre-flight cleanup)
+      { status: 0 }, // mcp add
+    );
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await handleCli(["connect", "claude", "--compartment", "personal"], deps);
+
+    const calls = vi.mocked(deps.spawnSync).mock.calls;
+    const addArgs = calls[2]?.[1] ?? [];
+    expect(addArgs).toEqual([
+      "mcp",
+      "add",
+      "--scope",
+      "user",
+      "--transport",
+      "http",
+      "vx",
+      `${VX_URL}?compartment=personal`,
+    ]);
+  });
+
+  it("scopes OpenClaw's mcp add through npx to the compartment", async () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(join(deps.homedir(), ".openclaw-dev", "openclaw.json"), "{}\n", "utf8");
+    mockSpawn(
+      deps,
+      { status: 1 }, // command -v openclaw
+      { status: 0, stdout: "/usr/bin/npx\n" }, // command -v npx
+      { status: 0, stdout: "Saved MCP server vx\n" },
+      { status: 0, stdout: "Applied 1 config update(s).\n" },
+    );
+
+    const notes = installOpenClaw(deps, { compartment: "personal" });
+
+    expect(vi.mocked(deps.spawnSync).mock.calls[2]?.[1]).toEqual([
+      "-y",
+      "openclaw",
+      "--dev",
+      "mcp",
+      "add",
+      "vx",
+      "--url",
+      `${VX_URL}?compartment=personal`,
+      "--transport",
+      "streamable-http",
+      "--auth",
+      "oauth",
+      "--include",
+      "vx_librarian_seed,vx_librarian_context,vx_reality,vx_recall,vx_store",
+      "--no-probe",
+    ]);
+    expect(notes.join("\n")).toContain("Configured OpenClaw VX MCP through npx");
+  });
+
+  it("scopes OpenClaw's connection when its CLI is already on PATH", () => {
+    const deps = createDeps();
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "/usr/local/bin/openclaw\n" }, // findCli
+      { status: 0 }, // plugins install
+      { status: 0 }, // mcp tools --include
+      { status: 0 }, // mcp add --url <scoped>
+      { status: 0, stdout: "Applied 1 config update(s).\n" }, // config patch --stdin
+    );
+
+    const notes = installOpenClaw(deps, { compartment: "work" });
+
+    const calls = vi.mocked(deps.spawnSync).mock.calls;
+    expect(calls[3]?.[1]).toEqual([
+      "mcp",
+      "add",
+      "vx",
+      "--url",
+      `${VX_URL}?compartment=work`,
+      "--transport",
+      "streamable-http",
+      "--auth",
+      "oauth",
+      "--include",
+      "vx_librarian_seed,vx_librarian_context,vx_reality,vx_recall,vx_store",
+      "--no-probe",
+    ]);
+    expect(notes.join("\n")).toContain('Bound OpenClaw\'s VX MCP connection to compartment "work"');
+  });
+
+  it("does not change OpenClaw's CLI-present install path when no compartment is requested", () => {
+    const deps = createDeps();
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "/usr/local/bin/openclaw\n" },
+      { status: 0 },
+      { status: 0 },
+      { status: 0, stdout: "Applied 1 config update(s).\n" },
+    );
+
+    installOpenClaw(deps);
+
+    // Exactly the same 4 calls as the pre-compartment behavior: no extra
+    // `mcp add` call is introduced when `install` (not `connect`) is used.
+    expect(vi.mocked(deps.spawnSync).mock.calls.length).toBe(4);
+  });
+});
+
+describe("compartment-scoped readiness (ONE-118 regression guard)", () => {
+  it("still reports Cursor ready when connected with a compartment-scoped URL", () => {
+    const deps = createDeps();
+    installCursor(deps, { compartment: "personal" });
+    expect(getClientReadiness("cursor", deps)).toMatchObject({ status: "ready" });
+  });
+
+  it("still reports OpenClaw's config as pointing at the selected endpoint when compartment-scoped", () => {
+    const deps = createDeps();
+    mkdirSync(join(deps.homedir(), ".openclaw-dev"), { recursive: true });
+    writeFileSync(
+      join(deps.homedir(), ".openclaw-dev", "openclaw.json"),
+      JSON.stringify({
+        mcp: { servers: { vx: { url: `${VX_URL}?compartment=personal`, auth: "oauth" } } },
+      }),
+      "utf8",
+    );
+    mockSpawn(
+      deps,
+      { status: 1 }, // openclaw CLI lookup
+      { status: 1 }, // npx lookup (readiness falls back to manual-approval, not a mismatch)
+    );
+    const readiness = getClientReadiness("openclaw", deps);
+    expect(readiness.notes.join("\n")).not.toContain("but it points at");
+  });
+});
+
+describe("status (ONE-118)", () => {
+  it("reports every client as not connected on a clean machine", () => {
+    const deps = createDeps();
+    mockSpawn(deps, { status: 1 }); // `claude` CLI lookup, not found
+    for (const target of [
+      "claude",
+      "cursor",
+      "codex",
+      "openclaw",
+      "hermes",
+      "claude-desktop",
+      "windsurf",
+      "cline",
+      "zed",
+      "vscode",
+    ] as const) {
+      expect(getClientAccessStatus(target, deps)).toMatchObject({ connected: false, compartment: null });
+    }
+  });
+
+  it("reads the compartment back from a client connected through `connect`", () => {
+    const deps = createDeps();
+    installCursor(deps, { compartment: "personal" });
+    expect(getClientAccessStatus("cursor", deps)).toMatchObject({
+      connected: true,
+      compartment: "personal",
+    });
+  });
+
+  it("flags a plain `install` (no compartment) as connected but unscoped", () => {
+    const deps = createDeps();
+    installWindsurf(deps);
+    expect(getClientAccessStatus("windsurf", deps)).toMatchObject({
+      connected: true,
+      compartment: null,
+    });
+  });
+
+  it("buildStatusReport prints a compartment line for scoped clients and an UNSCOPED warning for legacy ones", () => {
+    const deps = createDeps();
+    installCursor(deps, { compartment: "personal" });
+    installWindsurf(deps);
+    mockSpawn(deps, { status: 1 }); // `claude` CLI lookup, not found
+    const report = buildStatusReport(deps).join("\n");
+    expect(report).toContain('Cursor: connected — compartment "personal"');
+    expect(report).toContain("Windsurf: connected — UNSCOPED");
+    expect(report).toContain("vx-mcp connect windsurf --compartment <name>");
+    expect(report).toContain("Claude Code: not connected");
+  });
+
+  it("reads the compartment back for every client type after connect", () => {
+    const deps = createDeps();
+    // 3 calls to install Claude (findCli, mcp remove, mcp add), then 2 more
+    // for getClientAccessStatus("claude", ...) below (findCli, mcp list) —
+    // Claude Code's own state is opaque to vx-mcp, so status must re-query
+    // `claude mcp list` exactly like readiness does.
+    mockSpawn(
+      deps,
+      { status: 0, stdout: "/usr/local/bin/claude\n" },
+      { status: 0 },
+      { status: 0 },
+      { status: 0, stdout: "/usr/local/bin/claude\n" },
+      { status: 0, stdout: `vx: ${VX_URL}?compartment=claude-scope (HTTP) - ✓ Connected\n` },
+    );
+    installClaude(deps, { compartment: "claude-scope" });
+    installCodex(deps, { compartment: "codebase" });
+    installHermes(deps, { compartment: "hermes-scope" });
+    installClaudeDesktop(deps, { compartment: "desktop" });
+
+    expect(getClientAccessStatus("claude", deps)).toMatchObject({ compartment: "claude-scope" });
+    expect(getClientAccessStatus("codex", deps)).toMatchObject({ compartment: "codebase" });
+    expect(getClientAccessStatus("hermes", deps)).toMatchObject({ compartment: "hermes-scope" });
+    expect(getClientAccessStatus("claude-desktop", deps)).toMatchObject({ compartment: "desktop" });
+  });
+
+  it("status reverses fully after uninstall", async () => {
+    const deps = createDeps();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await handleCli(["connect", "cursor", "--compartment", "personal"], deps);
+    expect(getClientAccessStatus("cursor", deps).connected).toBe(true);
+
+    await handleCli(["uninstall", "cursor"], deps);
+    expect(getClientAccessStatus("cursor", deps)).toMatchObject({ connected: false, compartment: null });
+  });
+
+  it("`vx-mcp status` CLI command prints the report", async () => {
+    const deps = createDeps();
+    mockSpawn(deps, { status: 1 }); // `claude` CLI lookup, not found
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await handleCli(["status"], deps);
+    const output = log.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(output).toContain("VX MCP per-client access");
   });
 });

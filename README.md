@@ -42,6 +42,33 @@ CLI, this is usually enough:
 export NODE_AUTH_TOKEN=$(gh auth token)
 ```
 
+### Connect one client to a named compartment
+
+```bash
+npx @vx-nyc/vx-mcp connect cursor --compartment personal
+npx @vx-nyc/vx-mcp connect claude-desktop --compartment work-laptop
+```
+
+`connect` is the compartment-aware way to wire up a single client. Every
+`connect` requires `--compartment <name>` — there is no unscoped default, and
+vx-mcp refuses to write a config without one. The compartment name is written
+into that client's own connection URL, so a work laptop's Cursor and a
+personal machine's Claude Desktop can be bound to different compartments and
+never end up sharing knowledge that shouldn't cross.
+
+To change a client's compartment later, just run `connect` again with a new
+name — it's idempotent, the same as `install`.
+
+Check what every connected client can see in one command:
+
+```bash
+npx @vx-nyc/vx-mcp status
+```
+
+This reports, per client: not connected, connected with a named compartment,
+or connected but **unscoped** (a plain `install`, with no compartment — flagged
+because an unscoped connection can read everything the account grants).
+
 ### Which tools do you already have installed?
 
 ```bash
@@ -440,6 +467,26 @@ context includes its subcontexts.
 If you have an existing per-device VX API key from a previous version, it is
 **not used** by v1 — clients connect over OAuth-authenticated HTTP instead.
 
+## Compartments — per-tool access
+
+`connect <client> --compartment <name>` binds that client's connection to a
+named compartment instead of a bare, unscoped endpoint. The compartment name
+travels as a `compartment` query parameter on the URL vx-mcp writes into that
+client's own config (or passes to its CLI) — there is no separate credential
+or local database vx-mcp keeps track of. `vx-mcp status` reads the same URL
+back out of each client's config to report what it's bound to, so the two
+never drift apart.
+
+vx-mcp itself does not mint credentials, call the VX REST API, or verify
+server-side enforcement — it is an installer, not a runtime. What it does
+guarantee, entirely at this layer, is that `connect` never writes a config
+with a missing or empty compartment: a connection is either explicitly scoped
+or refused outright, never silently unscoped.
+
+Plain `install` (without `--compartment`) still works exactly as before, for
+backward compatibility — but `status` will call it out as **UNSCOPED** so it's
+never a surprise which of your connected clients can read everything.
+
 ## Uninstall
 
 ```bash
@@ -512,8 +559,10 @@ tools. See your client's tool list after installation.
 ## CLI
 
 ```bash
+vx-mcp connect <claude|cursor|codex|openclaw|hermes|claude-desktop|windsurf|cline|zed|vscode> --compartment <name> [--dry-run]
 vx-mcp install <all|claude|cursor|codex|openclaw|hermes|claude-desktop|windsurf|cline|zed|vscode> [--dry-run]
 vx-mcp uninstall <claude|cursor|codex|openclaw|hermes|claude-desktop|windsurf|cline|zed|vscode> [--dry-run]
+vx-mcp status
 vx-mcp login <openclaw|hermes|all>
 vx-mcp smoke <openclaw|hermes>
 vx-mcp doctor
@@ -523,12 +572,14 @@ vx-mcp --version
 vx-mcp --help
 ```
 
-`--dry-run` prints exactly what an `install`/`uninstall` would change — a diff
-of the config file it would write — without touching disk. `detect` reports
-which supported clients are actually present on this machine (from a CLI on
-PATH, an installed app, or an existing config directory), so a GUI can offer
-"we found N tools — connect them?" instead of a blind picklist; `--json`
-emits the same data as machine-readable JSON.
+`--dry-run` prints exactly what a `connect`/`install`/`uninstall` would
+change — a diff of the config file it would write — without touching disk.
+`detect` reports which supported clients are actually present on this machine
+(from a CLI on PATH, an installed app, or an existing config directory), so a
+GUI can offer "we found N tools — connect them?" instead of a blind picklist;
+`--json` emits the same data as machine-readable JSON. `status` reports every
+connected client and the compartment (if any) it's bound to — see
+"Compartments — per-tool access" above.
 
 ## Migrating from v0.x
 

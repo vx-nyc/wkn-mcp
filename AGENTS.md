@@ -99,7 +99,12 @@ openclaw.plugin.json
 4. Every installX/uninstallX must accept `(deps, options: InstallOptions)`,
    be idempotent, merge rather than overwrite existing file content, support
    `options.dryRun` (route file writes through `writeOrPreview`), and point
-   at `VX_MCP_URL` from `constants.ts`.
+   at the URL from `installUrl(options)` — not `VX_MCP_URL` directly — so
+   `connect --compartment <name>` scopes this client the same as every other
+   one. If any code path compares a stored URL back to `VX_MCP_URL` (for
+   readiness or status), use `isVxMcpUrl()`/prefix-tolerant matching instead
+   of strict equality, since a compartment-scoped URL has a `?compartment=`
+   suffix.
 5. Add a case to `getClientReadiness()` (reuse `jsonMcpClientReadiness` for
    JSON-map clients) and to `detectClient()` so `doctor`/`detect` both cover
    it.
