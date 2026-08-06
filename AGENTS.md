@@ -62,6 +62,30 @@ This repository is public. Treat it as public at all times.
 - If a change depends on private backend work, describe only the public
   behavior required by this repo.
 
+## Working model - execution vs. product
+
+The agent owns **execution**; the owner owns **product and vision**.
+
+- Technical and execution decisions belong to the agent - architecture,
+  tooling, code structure, refactor scope, naming, which sound approach to
+  take. Analyze the trade-offs, decide, and proceed. Do not ask.
+- Escalate only genuine product / user-experience questions - what a feature
+  does, how it should feel, what to prioritise.
+- "Figure it out" is the default. Report decisions and rationale after the
+  fact; don't seek pre-approval for execution.
+
+## First-principles engineering
+
+Default question for any change: **"what can I REMOVE?"** - not "what can I
+add?" Question every requirement before adding code.
+
+- Prefer deleting parts over adding them; a good cleanup change has more red
+  than green. (This package is already a deliberate removal - v1 deleted the
+  runtime, the SDK dependency, and env-var auth. Keep it that lean.)
+- Never add a try/catch, fallback, or retry *as the fix* - find the
+  structural cause and redesign that segment.
+- Don't refactor or remove code on a tested path without a before/after check.
+
 ## Layout
 
 ```
